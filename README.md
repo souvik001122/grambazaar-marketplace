@@ -15,6 +15,12 @@ The repository is maintained for academic evaluation with startup-ready engineer
 - Admin moderation for sellers, products, and operational oversight.
 - Reviews, notifications, and issue escalation workflows.
 
+## Team Members
+- Shubham Kumar (231210099)
+- Souvik Das (231210104)
+- Vivek Bhardwaj (231210125)
+- Yuvraj Pegu (231210129)
+
 ## Tech Stack
 - Frontend: React Native (Expo) + TypeScript
 - Backend Platform: Appwrite (Auth, Database, Storage)
