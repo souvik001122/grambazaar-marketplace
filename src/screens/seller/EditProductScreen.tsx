@@ -6,7 +6,6 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,6 +26,8 @@ import {
   validateProductName,
   validateStock,
 } from '../../utils/validation';
+import { PremiumImage } from '../../components/PremiumImage';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 const EditProductScreen = ({ route, navigation }: any) => {
   const product: Product = route.params.product;
@@ -207,15 +208,13 @@ const EditProductScreen = ({ route, navigation }: any) => {
         extraScrollHeight={24}
         extraHeight={120}
       >
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <View>
-            <Text style={styles.title}>Edit Product</Text>
-            <Text style={styles.subtitle}>Update details and re-submit for review</Text>
-          </View>
-        </View>
+          <PremiumTopBar
+            title="Edit Product"
+            subtitle="Update details and re-submit for review"
+            icon="create-outline"
+            showBack={navigation.canGoBack()}
+            onBack={() => navigation.goBack()}
+          />
 
         <View style={styles.form}>
           <View style={styles.locationBox}>
@@ -307,7 +306,11 @@ const EditProductScreen = ({ route, navigation }: any) => {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesScroll}>
               {existingImages.map((uri, index) => (
                 <View key={`existing-${index}`} style={styles.imageContainer}>
-                  <Image source={{ uri }} style={styles.productImage} />
+                  <PremiumImage
+                    uri={uri}
+                    style={styles.productImage}
+                    variant="product"
+                  />
                   <TouchableOpacity style={styles.removeImageButton} onPress={() => handleRemoveExistingImage(index)}>
                     <Text style={styles.removeImageText}>✕</Text>
                   </TouchableOpacity>
@@ -323,7 +326,11 @@ const EditProductScreen = ({ route, navigation }: any) => {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesScroll}>
               {newImages.map((uri, index) => (
                 <View key={`new-${index}`} style={styles.imageContainer}>
-                  <Image source={{ uri }} style={styles.productImage} />
+                  <PremiumImage
+                    uri={uri}
+                    style={styles.productImage}
+                    variant="product"
+                  />
                   <TouchableOpacity style={styles.removeImageButton} onPress={() => handleRemoveNewImage(index)}>
                     <Text style={styles.removeImageText}>✕</Text>
                   </TouchableOpacity>
@@ -368,36 +375,10 @@ const EditProductScreen = ({ route, navigation }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    backgroundColor: COLORS.primary,
-    padding: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
+    backgroundColor: COLORS.background,
   },
   form: {
-    padding: 20,
+    padding: 16,
   },
   locationBox: {
     flexDirection: 'row',
@@ -429,17 +410,18 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: '700',
+    color: COLORS.text,
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
+    backgroundColor: COLORS.surface,
+    borderRadius: 10,
     padding: 14,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: COLORS.border,
+    color: COLORS.text,
   },
   textArea: {
     height: 120,
@@ -449,13 +431,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   categoryChip: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
     marginRight: 10,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: COLORS.border,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -469,7 +451,7 @@ const styles = StyleSheet.create({
   },
   categoryText: {
     fontSize: 14,
-    color: '#666',
+    color: COLORS.textSecondary,
   },
   categoryTextSelected: {
     color: '#fff',
@@ -481,7 +463,7 @@ const styles = StyleSheet.create({
   },
   imageSectionText: {
     fontSize: 12,
-    color: '#999',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   imagesScroll: {
@@ -495,7 +477,7 @@ const styles = StyleSheet.create({
   productImage: {
     width: 100,
     height: 100,
-    borderRadius: 8,
+    borderRadius: 10,
   },
   removeImageButton: {
     position: 'absolute',
@@ -516,10 +498,10 @@ const styles = StyleSheet.create({
   addImageButton: {
     width: 100,
     height: 100,
-    backgroundColor: '#fff',
-    borderRadius: 8,
+    backgroundColor: COLORS.surface,
+    borderRadius: 10,
     borderWidth: 2,
-    borderColor: '#e0e0e0',
+    borderColor: COLORS.border,
     borderStyle: 'dashed',
     justifyContent: 'center',
     alignItems: 'center',
@@ -530,11 +512,11 @@ const styles = StyleSheet.create({
   },
   addImageText: {
     fontSize: 12,
-    color: '#666',
+    color: COLORS.textSecondary,
   },
   submitButton: {
     backgroundColor: COLORS.primary,
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
     alignItems: 'center',
     flexDirection: 'row',
@@ -547,7 +529,7 @@ const styles = StyleSheet.create({
   submitButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   noteBox: {
     backgroundColor: '#FFF3E0',
@@ -564,7 +546,7 @@ const styles = StyleSheet.create({
   noteText: {
     flex: 1,
     fontSize: 13,
-    color: '#555',
+    color: COLORS.textSecondary,
     lineHeight: 20,
   },
 });

@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   Modal,
   FlatList,
@@ -41,6 +40,8 @@ import {
   validateShopName,
   validateSkills,
 } from '../../utils/validation';
+import { PremiumImage } from '../../components/PremiumImage';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 type PickedDocument = {
   uri: string;
@@ -769,20 +770,18 @@ export const BecomeSellerScreen = ({ onProfileCreated }: any) => {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <View style={styles.screenHeader}>
-        <Ionicons name="storefront-outline" size={24} color="#fff" />
-        <Text style={[styles.screenHeaderTitle, { flex: 1 }]}>Become a Seller</Text>
-        <TouchableOpacity
-          onPress={() => {
-            showAlert('Logout', 'Are you sure you want to logout?', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Logout', style: 'destructive', onPress: () => logout() },
-            ]);
-          }}
-        >
-          <Ionicons name="log-out-outline" size={24} color="#fff" />
-        </TouchableOpacity>
-      </View>
+      <PremiumTopBar
+        title="Become a Seller"
+        subtitle="Create your verified shop profile"
+        icon="storefront-outline"
+        rightLabel="Logout"
+        onRightPress={() => {
+          showAlert('Logout', 'Are you sure you want to logout?', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Logout', style: 'destructive', onPress: () => logout() },
+          ]);
+        }}
+      />
 
       <KeyboardAwareScrollView
         style={styles.scroll}
@@ -986,7 +985,12 @@ export const BecomeSellerScreen = ({ onProfileCreated }: any) => {
               <TouchableOpacity style={styles.uploadButton} onPress={handlePickShopPhoto}>
                 {shopPhoto ? (
                   <View style={styles.uploadedPreview}>
-                    <Image source={{ uri: shopPhoto }} style={styles.uploadedImage} resizeMode="cover" />
+                    <PremiumImage
+                      uri={shopPhoto}
+                      style={styles.uploadedImage}
+                      resizeMode="cover"
+                      variant="shop"
+                    />
                     <View style={styles.uploadedFooter}>
                       <Text style={styles.uploadedFooterText}>1/1 shop image selected. Tap to replace.</Text>
                     </View>
@@ -1121,7 +1125,7 @@ export const BecomeSellerScreen = ({ onProfileCreated }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: COLORS.background,
   },
   scroll: {
     flex: 1,
@@ -1163,17 +1167,17 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 20,
     borderRadius: 14,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     paddingHorizontal: 14,
     paddingTop: 14,
     paddingBottom: 8,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: COLORS.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 1,
   },
   row: {
     flexDirection: 'row',
@@ -1188,9 +1192,9 @@ const styles = StyleSheet.create({
   sectionCard: {
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    backgroundColor: '#FAFAFA',
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    backgroundColor: COLORS.card,
     paddingHorizontal: 12,
     paddingTop: 12,
     paddingBottom: 4,
@@ -1214,29 +1218,29 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 14,
     fontWeight: '800',
-    color: '#374151',
+    color: COLORS.text,
   },
   sectionSubtitle: {
     marginTop: 2,
     fontSize: 12,
     lineHeight: 17,
-    color: '#6B7280',
+    color: COLORS.textSecondary,
   },
   label: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#374151',
+    color: COLORS.text,
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 13,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    color: '#111827',
+    borderColor: COLORS.border,
+    color: COLORS.text,
   },
   addressArea: {
     minHeight: 88,
@@ -1336,7 +1340,7 @@ const styles = StyleSheet.create({
     marginTop: 7,
     fontSize: 12,
     lineHeight: 18,
-    color: '#6B7280',
+    color: COLORS.textSecondary,
   },
   warningText: {
     marginTop: 8,
@@ -1374,10 +1378,10 @@ const styles = StyleSheet.create({
     color: '#6B7280',
   },
   uploadButton: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: COLORS.border,
     overflow: 'hidden',
   },
   uploadPlaceholder: {
@@ -1389,7 +1393,7 @@ const styles = StyleSheet.create({
   },
   uploadText: {
     fontSize: 14,
-    color: '#4B5563',
+    color: COLORS.textSecondary,
     textAlign: 'center',
   },
   uploadedPreview: {
@@ -1418,12 +1422,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-    backgroundColor: '#fff',
+    borderTopColor: COLORS.border,
+    backgroundColor: COLORS.surface,
   },
   uploadedFooterText: {
     fontSize: 13,
-    color: '#4B5563',
+    color: COLORS.textSecondary,
   },
   removeUploadBtn: {
     marginTop: 8,
@@ -1467,7 +1471,7 @@ const styles = StyleSheet.create({
   },
   verifySummaryText: {
     fontSize: 12,
-    color: '#6B7280',
+    color: COLORS.textSecondary,
   },
   verifyCard: {
     marginBottom: 18,
@@ -1476,7 +1480,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 18,
     backgroundColor: COLORS.primary,
-    borderRadius: 10,
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',

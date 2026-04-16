@@ -19,8 +19,9 @@ import { Review } from '../../types/common.types';
 import { COLORS } from '../../constants/colors';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
-const SellerReviewsScreen = () => {
+const SellerReviewsScreen = ({ navigation }: any) => {
   const { user } = useAuth();
   const [reviews, setReviews] = useState<Review[]>([]);
   const [productMap, setProductMap] = useState<Record<string, string>>({});
@@ -161,6 +162,17 @@ const SellerReviewsScreen = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <PremiumTopBar
+        title="Reviews"
+        subtitle="Track buyer feedback and rating quality"
+        icon="star-outline"
+        showBack={navigation?.canGoBack?.()}
+        onBack={() => navigation?.goBack?.()}
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={onRefresh}
+        rightDisabled={refreshing}
+      />
+
       <FlatList
         data={reviews}
         keyExtractor={(item) => item.$id}
@@ -194,43 +206,60 @@ const SellerReviewsScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: COLORS.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  listContent: { padding: 16 },
+  listContent: { padding: 14 },
   summaryCard: {
-    flexDirection: 'row', backgroundColor: '#fff', borderRadius: 12, padding: 20,
-    marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08, shadowRadius: 4, elevation: 3,
+    flexDirection: 'row',
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 18,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   summaryLeft: { alignItems: 'center', justifyContent: 'center', marginRight: 24 },
-  avgRating: { fontSize: 40, fontWeight: '700', color: '#333' },
-  totalReviews: { fontSize: 12, color: '#999', marginTop: 4 },
+  avgRating: { fontSize: 34, fontWeight: '800', color: COLORS.text },
+  totalReviews: { fontSize: 11, color: COLORS.textSecondary, marginTop: 4, fontWeight: '600' },
   summaryRight: { flex: 1, justifyContent: 'center' },
   starsRow: { flexDirection: 'row', gap: 2 },
   barRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 2 },
-  barLabel: { width: 28, fontSize: 12, color: '#666', textAlign: 'right', marginRight: 8 },
-  barTrack: { flex: 1, height: 8, backgroundColor: '#f0f0f0', borderRadius: 4, overflow: 'hidden' },
+  barLabel: { width: 28, fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginRight: 8 },
+  barTrack: { flex: 1, height: 8, backgroundColor: COLORS.border, borderRadius: 4, overflow: 'hidden' },
   barFill: { height: '100%', backgroundColor: '#FFC107', borderRadius: 4 },
-  barCount: { width: 24, fontSize: 12, color: '#999', textAlign: 'center', marginLeft: 8 },
+  barCount: { width: 24, fontSize: 12, color: COLORS.textTertiary, textAlign: 'center', marginLeft: 8 },
   reviewCard: {
-    backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 10,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05,
-    shadowRadius: 2, elevation: 2,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 14,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
-  reviewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
+  reviewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
   reviewerInfo: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   avatar: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: COLORS.primary,
+    width: 34, height: 34, borderRadius: 17, backgroundColor: COLORS.primary,
     alignItems: 'center', justifyContent: 'center',
   },
-  reviewerName: { fontSize: 14, fontWeight: '600', color: '#333' },
-  productName: { fontSize: 12, color: '#999', maxWidth: 150 },
+  reviewerName: { fontSize: 14, fontWeight: '700', color: COLORS.text },
+  productName: { fontSize: 12, color: COLORS.textSecondary, maxWidth: 150 },
   ratingBadge: { marginLeft: 8 },
-  comment: { fontSize: 14, color: '#444', lineHeight: 20, marginBottom: 8 },
-  reviewDate: { fontSize: 12, color: '#bbb' },
+  comment: { fontSize: 13, color: COLORS.textSecondary, lineHeight: 19, marginBottom: 8 },
+  reviewDate: { fontSize: 11, color: COLORS.textTertiary },
   emptyContainer: { alignItems: 'center', paddingTop: 60 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#333', marginTop: 16 },
-  emptySubtext: { fontSize: 14, color: '#999', marginTop: 4 },
+  emptyTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginTop: 16 },
+  emptySubtext: { fontSize: 13, color: COLORS.textSecondary, marginTop: 4 },
 });
 
 export default SellerReviewsScreen;

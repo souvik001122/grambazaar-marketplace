@@ -22,8 +22,9 @@ import { COLORS } from '../../constants/colors';
 import { showAlert } from '../../utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
-const SellerNotificationsScreen = () => {
+const SellerNotificationsScreen = ({ navigation }: any) => {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -180,6 +181,17 @@ const SellerNotificationsScreen = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+      <PremiumTopBar
+        title="Notifications"
+        subtitle="Updates for orders, reviews, and verification"
+        icon="notifications-outline"
+        showBack={navigation?.canGoBack?.()}
+        onBack={() => navigation?.goBack?.()}
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={onRefresh}
+        rightDisabled={refreshing}
+      />
+
       {/* Header Actions */}
       {notifications.length > 0 && unreadCount > 0 && (
         <View style={styles.headerActions}>
@@ -211,38 +223,40 @@ const SellerNotificationsScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: COLORS.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   headerActions: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#fff',
-    borderBottomWidth: 1, borderBottomColor: '#eee',
+    paddingHorizontal: 16, paddingVertical: 11, backgroundColor: COLORS.surface,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
-  unreadLabel: { fontSize: 13, fontWeight: '600', color: '#666' },
-  markAllText: { fontSize: 13, fontWeight: '600', color: COLORS.primary },
-  listContent: { padding: 12 },
+  unreadLabel: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary },
+  markAllText: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
+  listContent: { padding: 14 },
   notifCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    borderRadius: 12, padding: 14, marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface,
+    borderRadius: 14, padding: 14, marginBottom: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04, shadowRadius: 2, elevation: 1,
+    shadowOpacity: 0.04, shadowRadius: 3, elevation: 1,
   },
-  unreadCard: { backgroundColor: `${COLORS.primary}08`, borderLeftWidth: 3, borderLeftColor: COLORS.primary },
+  unreadCard: { backgroundColor: `${COLORS.primary}0A`, borderLeftWidth: 3, borderLeftColor: COLORS.primary },
   iconContainer: {
-    width: 44, height: 44, borderRadius: 22, alignItems: 'center',
+    width: 42, height: 42, borderRadius: 21, alignItems: 'center',
     justifyContent: 'center', marginRight: 12,
   },
   notifContent: { flex: 1 },
-  notifMessage: { fontSize: 14, color: '#444', lineHeight: 20 },
-  unreadText: { fontWeight: '600', color: '#222' },
-  notifTime: { fontSize: 12, color: '#999', marginTop: 4 },
+  notifMessage: { fontSize: 13, color: COLORS.textSecondary, lineHeight: 18 },
+  unreadText: { fontWeight: '700', color: COLORS.text },
+  notifTime: { fontSize: 11, color: COLORS.textTertiary, marginTop: 4 },
   unreadDot: {
     width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.primary,
     marginLeft: 8,
   },
   emptyContainer: { alignItems: 'center', paddingTop: 80 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#333', marginTop: 16 },
-  emptySubtext: { fontSize: 14, color: '#999', marginTop: 4, textAlign: 'center', paddingHorizontal: 40 },
+  emptyTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginTop: 16 },
+  emptySubtext: { fontSize: 13, color: COLORS.textSecondary, marginTop: 4, textAlign: 'center', paddingHorizontal: 40 },
 });
 
 export default SellerNotificationsScreen;

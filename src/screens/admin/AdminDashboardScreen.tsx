@@ -14,8 +14,8 @@ import { getAnalytics, getRecentActivity } from '../../services/adminService';
 import { AdminLog } from '../../types/common.types';
 import { COLORS } from '../../constants/colors';
 import { showAlert } from '../../utils/alert';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
-// Map screen names to tab-based navigation
 const SCREEN_TAB_MAP: Record<string, { tab: string; screen: string }> = {
   AdminSellers: { tab: 'SellersTab', screen: 'AdminSellers' },
   AdminProducts: { tab: 'ProductsTab', screen: 'AdminProducts' },
@@ -45,6 +45,17 @@ interface DashboardStats {
   pendingReports: number;
 }
 
+const ADMIN_DASHBOARD_CACHE_TTL_MS = 3 * 60 * 1000;
+
+type AdminDashboardSnapshot = {
+  userId: string;
+  stats: DashboardStats | null;
+  recentLogs: AdminLog[];
+  cachedAt: number;
+};
+
+let ADMIN_DASHBOARD_CACHE: AdminDashboardSnapshot | null = null;
+
 const AdminDashboardScreen = ({ navigation }: any) => {
   const { user, logout } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -53,7 +64,11 @@ const AdminDashboardScreen = ({ navigation }: any) => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
 
-  const loadData = async () => {
+  const loadData = useCallback(async ({ blocking = true }: { blocking?: boolean } = {}) => {
+    if (blocking) {
+      setLoading(true);
+    }
+
     try {
       const [analyticsData, logs] = await Promise.all([
         getAnalytics(),
@@ -62,24 +77,48 @@ const AdminDashboardScreen = ({ navigation }: any) => {
       setStats(analyticsData);
       setRecentLogs(logs);
       setError(false);
-    } catch (error) {
-      console.error('Error loading dashboard:', error);
+
+      if (user?.$id) {
+        ADMIN_DASHBOARD_CACHE = {
+          userId: user.$id,
+          stats: analyticsData,
+          recentLogs: logs,
+          cachedAt: Date.now(),
+        };
+      }
+    } catch (loadError) {
+      console.error('Error loading dashboard:', loadError);
       setError(true);
       if (!refreshing) showAlert('Error', 'Failed to load dashboard data.');
     } finally {
-      setLoading(false);
+      if (blocking) {
+        setLoading(false);
+      }
       setRefreshing(false);
     }
-  };
+  }, [refreshing, user?.$id]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    const canUseSnapshot =
+      !!user?.$id &&
+      !!ADMIN_DASHBOARD_CACHE &&
+      ADMIN_DASHBOARD_CACHE.userId === user.$id &&
+      Date.now() - ADMIN_DASHBOARD_CACHE.cachedAt <= ADMIN_DASHBOARD_CACHE_TTL_MS;
+
+    if (canUseSnapshot) {
+      setStats(ADMIN_DASHBOARD_CACHE!.stats);
+      setRecentLogs(ADMIN_DASHBOARD_CACHE!.recentLogs);
+      setLoading(false);
+      setError(false);
+    }
+
+    loadData({ blocking: !canUseSnapshot });
+  }, [loadData, user?.$id]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadData();
-  }, []);
+    loadData({ blocking: false });
+  }, [loadData]);
 
   if (loading) {
     return (
@@ -93,10 +132,16 @@ const AdminDashboardScreen = ({ navigation }: any) => {
     return (
       <View style={styles.loadingContainer}>
         <Ionicons name="cloud-offline-outline" size={60} color={COLORS.textTertiary} />
-        <Text style={{ fontSize: 16, fontWeight: '600', color: COLORS.text, marginTop: 16 }}>Failed to load data</Text>
-        <Text style={{ fontSize: 13, color: COLORS.textSecondary, marginTop: 4 }}>Check your connection and try again</Text>
-        <TouchableOpacity onPress={() => { setLoading(true); setError(false); loadData(); }} style={{ marginTop: 16, paddingHorizontal: 24, paddingVertical: 10, backgroundColor: COLORS.primary, borderRadius: 8 }}>
-          <Text style={{ color: '#FFF', fontWeight: '600' }}>Retry</Text>
+        <Text style={styles.errorTitle}>Failed to load data</Text>
+        <Text style={styles.errorSubtitle}>Check your connection and try again</Text>
+        <TouchableOpacity
+          onPress={() => {
+            setError(false);
+            loadData({ blocking: true });
+          }}
+          style={styles.retryButton}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
       </View>
     );
@@ -110,13 +155,12 @@ const AdminDashboardScreen = ({ navigation }: any) => {
     { label: 'Total Products', value: stats?.totalProducts || 0, icon: 'cube', color: COLORS.primaryDark, screen: 'AdminProducts' },
     { label: 'Pending Products', value: stats?.pendingProducts || 0, icon: 'time', color: COLORS.warning, screen: 'AdminProducts' },
     { label: 'Active Products', value: stats?.activeProducts || 0, icon: 'checkmark-done', color: COLORS.success, screen: 'AdminProducts' },
-    { label: 'Total Reviews', value: stats?.totalReviews || 0, icon: 'star', color: COLORS.primaryLight, screen: null },
     { label: 'Pending Reports', value: stats?.pendingReports || 0, icon: 'flag', color: COLORS.error, screen: 'AdminReports' },
   ];
 
   const quickActions = [
-    { label: 'Pending Sellers', icon: 'people-circle', color: COLORS.warning, screen: 'AdminSellers', badge: stats?.pendingSellers },
-    { label: 'Pending Products', icon: 'cube-outline', color: COLORS.primary, screen: 'AdminProducts', badge: stats?.pendingProducts },
+    { label: 'Verify Sellers', icon: 'shield-checkmark-outline', color: COLORS.warning, screen: 'AdminSellers', badge: stats?.pendingSellers },
+    { label: 'Review Products', icon: 'cube-outline', color: COLORS.primaryDark, screen: 'AdminProducts', badge: stats?.pendingProducts },
     { label: 'Reports', icon: 'flag-outline', color: COLORS.error, screen: 'AdminReports', badge: stats?.pendingReports },
     { label: 'All Orders', icon: 'receipt-outline', color: COLORS.info, screen: 'AdminOrders', badge: null },
     { label: 'Users', icon: 'people-outline', color: COLORS.secondary, screen: 'AdminUsers', badge: null },
@@ -157,23 +201,19 @@ const AdminDashboardScreen = ({ navigation }: any) => {
       contentContainerStyle={{ paddingBottom: 16 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />}
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Welcome back,</Text>
-          <Text style={styles.adminName}>{user?.name || 'Admin'}</Text>
-        </View>
-        <TouchableOpacity style={styles.logoutBtn} onPress={() => {
+      <PremiumTopBar
+        title="Admin Dashboard"
+        subtitle={`Welcome back, ${user?.name || 'Admin'}`}
+        icon="grid-outline"
+        rightLabel="Logout"
+        onRightPress={() => {
           showAlert('Logout', 'Are you sure you want to logout?', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Logout', style: 'destructive', onPress: logout },
           ]);
-        }}>
-          <Ionicons name="log-out-outline" size={24} color={COLORS.error} />
-        </TouchableOpacity>
-      </View>
+        }}
+      />
 
-      {/* Stats Grid */}
       <Text style={styles.sectionTitle}>Platform Overview</Text>
       <View style={styles.statsGrid}>
         {statCards.map((card, index) => (
@@ -192,7 +232,6 @@ const AdminDashboardScreen = ({ navigation }: any) => {
         ))}
       </View>
 
-      {/* Quick Actions */}
       <Text style={styles.sectionTitle}>Quick Actions</Text>
       <View style={styles.actionsGrid}>
         {quickActions.map((action, index) => (
@@ -214,7 +253,6 @@ const AdminDashboardScreen = ({ navigation }: any) => {
         ))}
       </View>
 
-      {/* Recent Activity */}
       <Text style={styles.sectionTitle}>Recent Activity</Text>
       <View style={styles.activityContainer}>
         {recentLogs.length === 0 ? (
@@ -235,7 +273,6 @@ const AdminDashboardScreen = ({ navigation }: any) => {
           ))
         )}
       </View>
-
     </ScrollView>
   );
 };
@@ -251,34 +288,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.background,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    paddingTop: 16,
+  errorTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginTop: 16,
+  },
+  errorSubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 4,
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
     backgroundColor: COLORS.primary,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+    borderRadius: 8,
   },
-  greeting: {
-    fontSize: 14,
+  retryButtonText: {
     color: '#FFF',
-    opacity: 0.85,
-  },
-  adminName: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#FFF',
-    marginTop: 2,
-  },
-  logoutBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#FFF',
-    justifyContent: 'center',
-    alignItems: 'center',
+    fontWeight: '600',
   },
   sectionTitle: {
     fontSize: 17,

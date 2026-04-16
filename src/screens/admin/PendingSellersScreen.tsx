@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -15,6 +14,10 @@ import { getAllSellers, createAdminLog, blockSeller } from '../../services/admin
 import { verifySeller } from '../../services/sellerService';
 import { Seller } from '../../types/seller.types';
 import { COLORS } from '../../constants/colors';
+import { appwriteConfig } from '../../config/appwrite';
+import { normalizeImageList, resolveImageUrl } from '../../services/storageService';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
+import { PremiumImage } from '../../components/PremiumImage';
 import { showAlert } from '../../utils/alert';
 
 type FilterTab = 'pending' | 'approved' | 'rejected' | 'blocked' | 'all';
@@ -151,6 +154,8 @@ const AdminSellersScreen = ({ navigation }: any) => {
     const district = item.district || item.city || '';
     const state = item.state || item.region || '';
     const locationLabel = [locality, district, state].filter(Boolean).join(', ');
+    const verificationDocs = normalizeImageList(item.verificationDocuments);
+    const shopImageUrl = resolveImageUrl(appwriteConfig.documentsBucketId, verificationDocs[0]);
     return (
       <TouchableOpacity
         style={styles.card}
@@ -158,13 +163,12 @@ const AdminSellersScreen = ({ navigation }: any) => {
         activeOpacity={0.7}
       >
         <View style={styles.cardHeader}>
-          {item.verificationDocuments?.[0] ? (
-            <Image source={{ uri: item.verificationDocuments[0] }} style={styles.shopImage} resizeMode="cover" />
-          ) : (
-            <View style={[styles.shopImage, styles.placeholderImage]}>
-              <Ionicons name="storefront" size={24} color={COLORS.textTertiary} />
-            </View>
-          )}
+          <PremiumImage
+            uri={shopImageUrl}
+            style={styles.shopImage}
+            resizeMode="cover"
+            variant="shop"
+          />
           <View style={styles.cardInfo}>
             <Text style={styles.businessName} numberOfLines={1}>{item.businessName}</Text>
             <Text style={styles.craftType}>{item.craftType}</Text>
@@ -263,11 +267,14 @@ const AdminSellersScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.screenHeader}>
-        <Ionicons name="people" size={22} color="#FFF" />
-        <Text style={styles.screenHeaderTitle}>Sellers</Text>
-      </View>
+      <PremiumTopBar
+        title="Sellers"
+        subtitle="Review verification requests and seller status"
+        icon="people"
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={onRefresh}
+        rightDisabled={refreshing}
+      />
       {/* Filter Tabs */}
       <View style={styles.tabBar}>
         {tabs.map((tab) => (
