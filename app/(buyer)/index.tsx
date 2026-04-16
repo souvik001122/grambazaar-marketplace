@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, FlatList, Image } from 'react-native';
+import { View, StyleSheet, ScrollView, FlatList } from 'react-native';
 import { Text, Card, Chip, Searchbar, Button, useTheme } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -9,6 +9,7 @@ import { useCartStore } from '../../src/stores/cartStore';
 import { Product } from '../../src/types';
 import { productService } from '../../src/services/productService';
 import { showAlert } from '../../src/utils/alert';
+import { PremiumImage } from '../../src/components/PremiumImage';
 
 export default function BuyerHomeScreen() {
   const theme = useTheme();
@@ -46,9 +47,10 @@ export default function BuyerHomeScreen() {
 
   const renderProductCard = ({ item }: { item: Product }) => (
     <Card style={styles.productCard}>
-      <Card.Cover 
-        source={{ uri: item.images[0] || 'https://picsum.photos/400/300' }}
+      <PremiumImage
+        uri={item.images?.[0]}
         style={styles.productImage}
+        variant="product"
       />
       <Card.Content style={styles.productContent}>
         <Text variant="titleMedium" numberOfLines={2}>{item.name}</Text>

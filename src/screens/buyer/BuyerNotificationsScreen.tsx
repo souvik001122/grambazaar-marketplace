@@ -20,6 +20,7 @@ import {
 import { Notification } from '../../types/common.types';
 import { formatRelativeTime } from '../../utils/formatting';
 import { BUYER_LAYOUT } from '../../constants/layout';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 const BuyerNotificationsScreen = ({ navigation }: any) => {
   const tabBarHeight = 16;
@@ -115,22 +116,20 @@ const BuyerNotificationsScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.headerRow, railStyle]}>
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.headerTitle}>Notification Center</Text>
-          <Text style={styles.headerSubtitle}>Order updates, trust events, and important activity</Text>
-        </View>
-        <View style={styles.headerActionsWrap}>
-          <View style={styles.unreadPill}>
-            <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
-          </View>
-          <TouchableOpacity
-            style={[styles.markAllButton, (markingAll || unreadCount === 0) && styles.markAllDisabled]}
-            onPress={handleMarkAllRead}
-            disabled={markingAll || unreadCount === 0}
-          >
-            <Text style={styles.markAllText}>{markingAll ? 'Updating...' : 'Mark all read'}</Text>
-          </TouchableOpacity>
+      <PremiumTopBar
+        title="Notification Center"
+        subtitle="Order updates, trust events, and important activity"
+        icon="notifications"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+        rightLabel={markingAll ? 'Updating' : 'Mark all read'}
+        onRightPress={handleMarkAllRead}
+        rightDisabled={markingAll || unreadCount === 0}
+      />
+
+      <View style={[styles.headerActionsWrap, railStyle]}>
+        <View style={styles.unreadPill}>
+          <Text style={styles.unreadPillText}>{unreadCount} unread</Text>
         </View>
       </View>
 

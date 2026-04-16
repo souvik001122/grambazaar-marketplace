@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   RefreshControl,
   Linking,
@@ -23,7 +22,8 @@ import { Order } from '../../types/index';
 import { formatPrice, formatDateTime, formatRelativeTime } from '../../utils/formatting';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { StatusBadge } from '../../components/StatusBadge';
-import { getImageUrl } from '../../services/storageService';
+import { PremiumImage } from '../../components/PremiumImage';
+import { resolveImageUrl } from '../../services/storageService';
 import { appwriteConfig } from '../../config/appwrite';
 import { showAlert } from '../../utils/alert';
 import { useFocusEffect } from '@react-navigation/native';
@@ -31,6 +31,7 @@ import { getUserNotifications } from '../../services/notificationService';
 import { getReportsByOrder } from '../../services/adminService';
 import { Report } from '../../types/common.types';
 import { BUYER_LAYOUT } from '../../constants/layout';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 const ORDER_TIMELINE = [
   { key: 'pending', label: 'Order Placed', icon: 'receipt-outline' },
@@ -294,22 +295,34 @@ const BuyerOrderDetailScreen = ({ route, navigation }: any) => {
   const issueMeta = latestIssueReport ? getIssueStatusMeta(latestIssueReport.status) : null;
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={[
-        styles.content,
-        isCompact && styles.contentCompact,
-        { paddingBottom: tabBarHeight },
-      ]}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
-          tintColor={COLORS.primary}
-          colors={[COLORS.primary]}
-        />
-      }
-    >
+    <View style={styles.container}>
+      <PremiumTopBar
+        title="Order Detail"
+        subtitle={`#${order.$id.slice(-8).toUpperCase()} • ${(order.status || '').toUpperCase()}`}
+        icon="receipt-outline"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={handleRefresh}
+        rightDisabled={refreshing}
+      />
+
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.content,
+          isCompact && styles.contentCompact,
+          { paddingBottom: tabBarHeight },
+        ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={COLORS.primary}
+            colors={[COLORS.primary]}
+          />
+        }
+      >
       {/* Order ID & Status */}
       <View style={[styles.headerCard, isCompact && styles.cardCompact, wideRailStyle]}>
         <View style={styles.headerTop}>
@@ -398,13 +411,15 @@ const BuyerOrderDetailScreen = ({ route, navigation }: any) => {
       <View style={[styles.sectionCard, isCompact && styles.cardCompact, wideRailStyle]}>
         <Text style={styles.sectionTitle}>Items</Text>
         {(order.items || []).map((item, idx) => {
-          const imageUrl = item.productImage
-            ? getImageUrl(appwriteConfig.productImagesBucketId, item.productImage)
-            : 'https://via.placeholder.com/60';
+          const imageUrl = resolveImageUrl(appwriteConfig.productImagesBucketId, item.productImage);
 
           return (
             <View key={`${item.productId}-${idx}`} style={styles.itemRow}>
-              <Image source={{ uri: imageUrl }} style={styles.itemImage} />
+              <PremiumImage
+                uri={imageUrl}
+                style={styles.itemImage}
+                variant="product"
+              />
               <View style={styles.itemInfo}>
                 <Text style={styles.itemName} numberOfLines={1}>{item.productName}</Text>
                 <Text style={styles.itemQty}>Qty: {item.quantity} × {formatPrice(item.price)}</Text>
@@ -462,10 +477,11 @@ const BuyerOrderDetailScreen = ({ route, navigation }: any) => {
 
             {!!sellerPaymentContact.paymentQrImageUrl && (
               <View style={styles.paymentQrFrame}>
-                <Image
-                  source={{ uri: sellerPaymentContact.paymentQrImageUrl }}
+                <PremiumImage
+                  uri={sellerPaymentContact.paymentQrImageUrl}
                   style={styles.paymentQrImage}
                   resizeMode="contain"
+                  variant="qr"
                 />
               </View>
             )}
@@ -612,8 +628,9 @@ const BuyerOrderDetailScreen = ({ route, navigation }: any) => {
         )}
       </View>
 
-      <View style={{ height: 32 }} />
-    </ScrollView>
+        <View style={{ height: 32 }} />
+      </ScrollView>
+    </View>
   );
 };
 

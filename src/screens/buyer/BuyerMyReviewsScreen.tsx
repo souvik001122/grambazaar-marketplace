@@ -18,6 +18,7 @@ import { Review } from '../../types/common.types';
 import { formatRelativeTime } from '../../utils/formatting';
 import { StarRating } from '../../components/StarRating';
 import { BUYER_LAYOUT } from '../../constants/layout';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 const getReviewContextTag = (comment?: string): string | null => {
   const text = (comment || '').toLowerCase();
@@ -94,6 +95,14 @@ const BuyerMyReviewsScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
+      <PremiumTopBar
+        title="My Reviews"
+        subtitle="Your ratings help buyers trust local artisans"
+        icon="star"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+      />
+
       <FlatList
         data={reviews}
         keyExtractor={(item) => item.$id}
@@ -101,11 +110,6 @@ const BuyerMyReviewsScreen = ({ navigation }: any) => {
         contentContainerStyle={[styles.listContent, railStyle, { paddingBottom: tabBarHeight }]}
         ListHeaderComponent={
           <>
-            <View style={styles.headerCard}>
-              <Text style={styles.headerTitle}>My Reviews</Text>
-              <Text style={styles.headerSubtitle}>Your ratings help buyers trust local artisans</Text>
-            </View>
-
             <View style={styles.summaryCard}>
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryValue}>{reviews.length}</Text>

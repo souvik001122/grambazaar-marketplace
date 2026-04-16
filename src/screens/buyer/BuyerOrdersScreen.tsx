@@ -6,7 +6,6 @@ import {
   FlatList,
   TouchableOpacity,
   RefreshControl,
-  Image,
   ScrollView,
   useWindowDimensions,
 } from 'react-native';
@@ -18,9 +17,11 @@ import { Order } from '../../types/index';
 import { formatPrice, formatRelativeTime } from '../../utils/formatting';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { StatusBadge } from '../../components/StatusBadge';
+import { PremiumImage } from '../../components/PremiumImage';
 import { resolveImageUrl } from '../../services/storageService';
 import { appwriteConfig } from '../../config/appwrite';
 import { BUYER_LAYOUT } from '../../constants/layout';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 type FilterTab = 'all' | 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
 
@@ -121,9 +122,7 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
 
   const renderOrder = ({ item }: { item: Order }) => {
     const firstItem = item.items?.[0];
-    const imageUrl =
-      resolveImageUrl(appwriteConfig.productImagesBucketId, firstItem?.productImage) ||
-      'https://via.placeholder.com/60';
+    const imageUrl = resolveImageUrl(appwriteConfig.productImagesBucketId, firstItem?.productImage);
     const itemCount = item.items?.reduce((sum, i) => sum + i.quantity, 0) || 0;
 
     return (
@@ -141,7 +140,11 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
         </View>
 
         <View style={styles.orderBody}>
-          <Image source={{ uri: imageUrl }} style={styles.orderImage} />
+          <PremiumImage
+            uri={imageUrl}
+            style={styles.orderImage}
+            variant="product"
+          />
           <View style={styles.orderInfo}>
             <Text style={styles.orderItemName} numberOfLines={1}>
               {firstItem?.productName || 'Order'}
@@ -161,14 +164,16 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.screenHeader}>
-        <View style={styles.screenHeaderRow}>
-          <Ionicons name="receipt" size={22} color="#FFF" />
-          <Text style={styles.screenHeaderTitle}>My Orders</Text>
-        </View>
-        <Text style={styles.screenHeaderSubtitle}>Track every order update in one place</Text>
-      </View>
+      <PremiumTopBar
+        title="My Orders"
+        subtitle="Track every order update in one place"
+        icon="receipt"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={handleRefresh}
+        rightDisabled={refreshing}
+      />
       {/* Tabs */}
       <View style={styles.tabBarWrap}>
         <ScrollView
