@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
+import { PREMIUM_STACK_OPTIONS } from './premiumStackOptions';
 
 // Seller Screens
 import SellerDashboardScreen from '../screens/seller/SellerDashboardScreen';
@@ -69,7 +70,7 @@ const SellerTabs = () => {
 
 const SellerNavigator = () => {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ ...PREMIUM_STACK_OPTIONS, headerShown: false }}>
       <Stack.Screen name="SellerTabs" component={SellerTabs} />
       <Stack.Screen
         name="EditProduct"
@@ -78,32 +79,32 @@ const SellerNavigator = () => {
       <Stack.Screen
         name="SellerOrders"
         component={SellerOrdersScreen}
-        options={{ headerShown: true, title: 'Orders', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SellerMyProducts"
         component={MyProductsScreen}
-        options={{ headerShown: true, title: 'My Products', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SellerReviews"
         component={SellerReviewsScreen}
-        options={{ headerShown: true, title: 'Reviews', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SellerAnalytics"
         component={SellerAnalyticsScreen}
-        options={{ headerShown: true, title: 'Analytics', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SellerNotifications"
         component={SellerNotificationsScreen}
-        options={{ headerShown: true, title: 'Notifications', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SellerSettings"
         component={SellerSettingsScreen}
-        options={{ headerShown: true, title: 'Settings', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="VerificationStatus"

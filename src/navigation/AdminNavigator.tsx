@@ -5,6 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
 import { useAuth } from '../context/AuthContext';
+import { PREMIUM_STACK_OPTIONS } from './premiumStackOptions';
+import { PremiumTopBar } from '../components/PremiumTopBar';
 
 // Admin Screens
 import AdminDashboardScreen from '../screens/admin/AdminDashboardScreen';
@@ -33,7 +35,7 @@ const DashboardStack = () => (
 const SellersStack = () => (
   <Stack.Navigator screenOptions={stackScreenOptions}>
     <Stack.Screen name="AdminSellers" component={PendingSellersScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="AdminSellerDetail" component={AdminSellerDetailScreen} options={{ title: 'Seller Detail' }} />
+    <Stack.Screen name="AdminSellerDetail" component={AdminSellerDetailScreen} options={{ headerShown: false }} />
     <Stack.Screen name="AdminDocumentViewer" component={AdminDocumentViewerScreen} options={{ title: 'Document Preview' }} />
   </Stack.Navigator>
 );
@@ -48,7 +50,7 @@ const ProductsStack = () => (
 const OrdersStack = () => (
   <Stack.Navigator screenOptions={stackScreenOptions}>
     <Stack.Screen name="AdminOrders" component={AdminOrdersScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="AdminOrderDetail" component={AdminOrderDetailScreen} options={{ title: 'Order Detail' }} />
+    <Stack.Screen name="AdminOrderDetail" component={AdminOrderDetailScreen} options={{ headerShown: false }} />
   </Stack.Navigator>
 );
 
@@ -61,11 +63,7 @@ const MoreStack = () => (
   </Stack.Navigator>
 );
 
-const stackScreenOptions = {
-  headerStyle: { backgroundColor: COLORS.primary },
-  headerTintColor: '#FFF',
-  headerTitleStyle: { fontWeight: '700' as const },
-};
+const stackScreenOptions = PREMIUM_STACK_OPTIONS;
 
 // ─── "More" menu screen ─────────────────────────────────────────
 
@@ -80,10 +78,11 @@ const moreItems = [
 const AdminMoreMenu = ({ navigation }: any) => {
   return (
   <View style={{ flex: 1, backgroundColor: COLORS.background }}>
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.primary, paddingHorizontal: 20, paddingVertical: 14 }}>
-      <Ionicons name="ellipsis-horizontal" size={22} color="#FFF" />
-      <Text style={{ fontSize: 20, fontWeight: '700', color: '#FFF' }}>More</Text>
-    </View>
+    <PremiumTopBar
+      title="More"
+      subtitle="Admin tools, reports, and governance"
+      icon="ellipsis-horizontal"
+    />
     <ScrollView contentContainerStyle={[moreStyles.content, { paddingBottom: 16 }]}>
     {moreItems.map((item) => (
       <TouchableOpacity
