@@ -1,9 +1,10 @@
 import React, { useMemo, useRef } from 'react';
-import { View, Text, Image, StyleSheet, Animated, TouchableWithoutFeedback } from 'react-native';
+import { View, Text, StyleSheet, Animated, TouchableOpacity, TouchableWithoutFeedback } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Product } from '../types/product.types';
 import { StarRating } from './StarRating';
 import { StatusBadge } from './StatusBadge';
+import { PremiumImage } from './PremiumImage';
 import { formatPrice } from '../utils/formatting';
 import { COLORS } from '../constants/colors';
 import { normalizeImageList, resolveImageUrl } from '../services/storageService';
@@ -32,13 +33,35 @@ const ProductCardComponent: React.FC<ProductCardProps> = ({
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const isListMode = performanceMode === 'list';
   const premiumVariant = variant === 'premium';
+  const imageHeight = isListMode ? (premiumVariant ? 136 : 128) : premiumVariant ? 170 : 158;
+  const previewWidth = isListMode ? (fullWidth ? 360 : 280) : 760;
+  const previewHeight = imageHeight * 2;
 
   const imageUrl = useMemo(() => {
     const imageList = normalizeImageList((product as any).images);
-    return resolveImageUrl(appwriteConfig.productImagesBucketId, imageList[0]) || 'https://via.placeholder.com/300';
+    return resolveImageUrl(appwriteConfig.productImagesBucketId, imageList[0]);
   }, [product]);
 
   const regionLabel = useMemo(() => {
+    if (isListMode) {
+      const quickRaw = (
+        (product as any).state ||
+        product.region ||
+        (product as any).sellerLocationLabel ||
+        fallbackRegionLabel ||
+        'All India'
+      )
+        .toString()
+        .trim();
+
+      if (!quickRaw) {
+        return 'All India';
+      }
+
+      const firstToken = quickRaw.split(',')[0].trim();
+      return firstToken || 'All India';
+    }
+
     const normalize = (value: string) => value.trim().toLowerCase();
     const genericRegionLabels = new Map<string, string>([
       ['all india', 'All India'],
@@ -121,7 +144,7 @@ const ProductCardComponent: React.FC<ProductCardProps> = ({
     }
 
     return resolveRegionLabel(fallbackRegionLabel);
-  }, [fallbackRegionLabel, product]);
+  }, [fallbackRegionLabel, isListMode, product]);
 
   const sellerTrustScore = typeof product.sellerTrustScore === 'number' ? product.sellerTrustScore : null;
   const showTopArtisan = !!product.topArtisan;
@@ -140,81 +163,88 @@ const ProductCardComponent: React.FC<ProductCardProps> = ({
     }).start();
   };
 
-  return (
-    <TouchableWithoutFeedback
-      onPressIn={() => animateTo(0.97)}
-      onPressOut={() => animateTo(1)}
-      onPress={onPress}
-    >
-      <Animated.View
-        style={[
-          styles.container,
-          premiumVariant && styles.premiumContainer,
-          fullWidth && styles.fullWidthContainer,
-          isListMode && !premiumVariant && styles.listModeContainer,
-          isListMode && premiumVariant && styles.listModePremiumContainer,
-          { transform: [{ scale: scaleAnim }] },
-        ]}
-      >
+  const cardSurfaceStyle = [
+    styles.container,
+    premiumVariant && styles.premiumContainer,
+    fullWidth && styles.fullWidthContainer,
+    isListMode && !premiumVariant && styles.listModeContainer,
+    isListMode && premiumVariant && styles.listModePremiumContainer,
+  ];
+
+  const cardContent = (
+    <>
       <View style={styles.imageWrap}>
-        <Image
-          source={{ uri: imageUrl }}
+        <PremiumImage
+          uri={imageUrl}
           style={[
             styles.image,
             isListMode && styles.listModeImage,
             premiumVariant && styles.premiumImage,
             isListMode && premiumVariant && styles.premiumListModeImage,
+            { height: imageHeight },
           ]}
           resizeMode="cover"
-          fadeDuration={0}
-          resizeMethod="resize"
-          progressiveRenderingEnabled
+          variant="product"
+          performanceMode={isListMode ? 'list' : 'default'}
+          previewWidth={previewWidth}
+          previewHeight={previewHeight}
         />
       </View>
-      
+
       {showStatus && (
         <View style={styles.statusContainer}>
           <StatusBadge status={product.status} size="small" />
         </View>
       )}
 
-      {product.featured && (
+      {!isListMode && product.featured && (
         <View style={styles.featuredBadge}>
           <Text style={styles.featuredText}>Featured</Text>
         </View>
       )}
 
-      {showTopArtisan && (
+      {!isListMode && showTopArtisan && (
         <View style={styles.topArtisanBadge}>
           <Ionicons name="ribbon-outline" size={11} color="#7C2D12" />
           <Text style={styles.topArtisanText}>Top Artisan</Text>
         </View>
       )}
 
-      <View style={[styles.content, premiumVariant && styles.premiumContent]}>
+      <View
+        style={[
+          styles.content,
+          premiumVariant && styles.premiumContent,
+          isListMode && styles.listModeContent,
+          isListMode && premiumVariant && styles.listModePremiumContent,
+        ]}
+      >
         <View>
           <Text
-            style={[styles.name, premiumVariant && styles.premiumName]}
+            style={[
+              styles.name,
+              premiumVariant && styles.premiumName,
+              isListMode && styles.listModeName,
+            ]}
             numberOfLines={1}
             ellipsizeMode="tail"
           >
             {product.name}
           </Text>
 
-          <View style={styles.metaRow}>
+          <View style={[styles.metaRow, isListMode && styles.listModeMetaRow]}>
             <View style={[styles.regionTag, premiumVariant && styles.premiumRegionTag]}>
               <Ionicons name="location-outline" size={11} color={COLORS.primary} />
               <Text style={[styles.regionTagText, premiumVariant && styles.premiumRegionTagText]} numberOfLines={1}>
                 {regionLabel || fallbackRegionLabel || 'All India'}
               </Text>
             </View>
-            {showVerifiedChip && (
+            {!isListMode && showVerifiedChip && (
               <View style={styles.verifiedChip}>
                 <Ionicons name="checkmark-circle" size={11} color={COLORS.verified} />
                 <Text style={styles.verifiedChipText}>Verified</Text>
               </View>
             )}
-            {showTrustChip && (
+            {!isListMode && showTrustChip && (
               <View style={[styles.trustChip, premiumVariant && styles.premiumTrustChip]}>
                 <Ionicons name="shield-checkmark-outline" size={11} color={COLORS.secondaryDark} />
                 <Text style={styles.trustChipText}>Trust {sellerTrustScore}</Text>
@@ -224,20 +254,31 @@ const ProductCardComponent: React.FC<ProductCardProps> = ({
         </View>
 
         <View>
-          <Text style={[styles.price, premiumVariant && styles.premiumPrice]}>{formatPrice(product.price)}</Text>
+          <Text style={[styles.price, premiumVariant && styles.premiumPrice, isListMode && styles.listModePrice]}>
+            {formatPrice(product.price)}
+          </Text>
 
           <View style={styles.ratingContainer}>
             {product.rating > 0 ? (
-              <>
-                <StarRating
-                  rating={product.rating}
-                  size={12}
-                  showNumber={false}
-                />
-                <Text style={styles.reviewCount}>
-                  ({product.reviewCount || 0})
-                </Text>
-              </>
+              isListMode ? (
+                <>
+                  <Ionicons name="star" size={12} color={COLORS.warning} />
+                  <Text style={styles.listModeRatingText}>
+                    {product.rating.toFixed(1)} ({product.reviewCount || 0})
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <StarRating
+                    rating={product.rating}
+                    size={12}
+                    showNumber={false}
+                  />
+                  <Text style={styles.reviewCount}>
+                    ({product.reviewCount || 0})
+                  </Text>
+                </>
+              )
             ) : (
               <>
                 <Ionicons name="star-outline" size={12} color={COLORS.textTertiary} />
@@ -247,6 +288,30 @@ const ProductCardComponent: React.FC<ProductCardProps> = ({
           </View>
         </View>
       </View>
+    </>
+  );
+
+  if (isListMode) {
+    return (
+      <TouchableOpacity activeOpacity={0.92} onPress={onPress}>
+        <View style={cardSurfaceStyle}>{cardContent}</View>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <TouchableWithoutFeedback
+      onPressIn={() => animateTo(0.97)}
+      onPressOut={() => animateTo(1)}
+      onPress={onPress}
+    >
+      <Animated.View
+        style={[
+          cardSurfaceStyle,
+          { transform: [{ scale: scaleAnim }] },
+        ]}
+      >
+      {cardContent}
       </Animated.View>
     </TouchableWithoutFeedback>
   );
@@ -296,9 +361,9 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   listModePremiumContainer: {
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
   },
   imageWrap: {
     backgroundColor: COLORS.card,
@@ -367,6 +432,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     paddingVertical: 12,
   },
+  listModeContent: {
+    height: 98,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+  },
+  listModePremiumContent: {
+    height: 102,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -375,6 +450,10 @@ const styles = StyleSheet.create({
     minHeight: 24,
     flexWrap: 'nowrap',
     overflow: 'hidden',
+  },
+  listModeMetaRow: {
+    marginBottom: 4,
+    minHeight: 20,
   },
   regionTag: {
     flexDirection: 'row',
@@ -448,6 +527,11 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginBottom: 6,
   },
+  listModeName: {
+    fontSize: 13,
+    lineHeight: 17,
+    marginBottom: 4,
+  },
   price: {
     fontSize: 17,
     fontWeight: 'bold',
@@ -458,6 +542,10 @@ const styles = StyleSheet.create({
     fontSize: 21,
     marginBottom: 8,
   },
+  listModePrice: {
+    fontSize: 16,
+    marginBottom: 4,
+  },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -467,6 +555,12 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontSize: 11,
     color: COLORS.textSecondary,
+  },
+  listModeRatingText: {
+    marginLeft: 4,
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
   },
   noRatingText: {
     marginLeft: 4,

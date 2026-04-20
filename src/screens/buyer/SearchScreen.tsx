@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   useWindowDimensions,
   Keyboard,
+  Platform,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,7 @@ import { CATEGORIES } from '../../constants/categories';
 import { BUYER_LAYOUT } from '../../constants/layout';
 import { useAuth } from '../../context/AuthContext';
 import { buildAutosuggestions } from '../../utils/autosuggest';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 type SortOption = 'newest' | 'rating' | 'trending' | 'trust_high';
 const SORT_OPTIONS: { key: SortOption; label: string }[] = [
@@ -45,6 +47,7 @@ const SMART_SUGGESTIONS = [
 
 const PRICE_VISUAL_MIN = 0;
 const PRICE_VISUAL_MAX = 20000;
+const SEARCH_PAGE_SIZE = 12;
 
 const clampNumber = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
@@ -291,7 +294,7 @@ const SearchScreen = ({ navigation, route }: any) => {
             deliveryAvailable: deliveryOnly || undefined,
           },
           p,
-          20
+          SEARCH_PAGE_SIZE
         );
 
         if (requestId !== latestSearchRequestId.current) {
@@ -430,9 +433,9 @@ const SearchScreen = ({ navigation, route }: any) => {
     }
   };
 
-  const handleProductPress = (product: Product) => {
+  const handleProductPress = useCallback((product: Product) => {
     navigation.navigate('ProductDetail', { productId: product.$id });
-  };
+  }, [navigation]);
 
   const navigateToAuth = (screen: 'Login' | 'Register') => {
     const lvl1 = navigation.getParent?.();
@@ -690,10 +693,13 @@ const SearchScreen = ({ navigation, route }: any) => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.screenHeader}>
-        <Ionicons name="search" size={22} color="#FFF" />
-        <Text style={styles.screenHeaderTitle}>Search</Text>
-      </View>
+      <PremiumTopBar
+        title="Search"
+        subtitle="Find products, artisans, and locations"
+        icon="search"
+        rightLabel={showFilters ? 'Hide Filters' : hasActiveFilters ? `Filters ${activeFilterCount}` : 'Filters'}
+        onRightPress={() => setShowFilters((prev) => !prev)}
+      />
 
       {!user && (
         <View style={[styles.guestBar, wideRailStyle]}>
@@ -1148,14 +1154,15 @@ const SearchScreen = ({ navigation, route }: any) => {
           keyExtractor={(item) => item.$id}
           numColumns={2}
           columnWrapperStyle={styles.row}
-          removeClippedSubviews
-          initialNumToRender={4}
-          maxToRenderPerBatch={4}
-          windowSize={5}
-          updateCellsBatchingPeriod={80}
+          removeClippedSubviews={Platform.OS === 'android'}
+          initialNumToRender={3}
+          maxToRenderPerBatch={3}
+          windowSize={4}
+          updateCellsBatchingPeriod={110}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           onScrollBeginDrag={Keyboard.dismiss}
+          showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.listContent,
             isCompact && styles.listContentCompact,
@@ -1164,7 +1171,7 @@ const SearchScreen = ({ navigation, route }: any) => {
           ]}
           renderItem={renderProduct}
           onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.3}
+          onEndReachedThreshold={0.2}
           ListFooterComponent={
             loadingMore ? (
               <View style={styles.loadMoreFooter}>

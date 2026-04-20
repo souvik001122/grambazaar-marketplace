@@ -15,6 +15,7 @@ import { getSellerByUserId, deleteSellerProfile } from '../../services/sellerSer
 import { Seller } from '../../types/seller.types';
 import { COLORS } from '../../constants/colors';
 import { showAlert } from '../../utils/alert';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 export const SellerVerificationStatusScreen = ({ navigation, onRecheck }: any) => {
   const { user, logout } = useAuth();
@@ -127,16 +128,13 @@ export const SellerVerificationStatusScreen = ({ navigation, onRecheck }: any) =
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      {/* Fixed Header */}
-      <View style={styles.screenHeader}>
-        {navigation?.goBack && (
-          <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginRight: 8 }}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-        )}
-        <Ionicons name="shield-checkmark-outline" size={24} color="#fff" />
-        <Text style={styles.screenHeaderTitle}>Verification Status</Text>
-      </View>
+      <PremiumTopBar
+        title="Verification Status"
+        subtitle="Track your seller application review"
+        icon="shield-checkmark-outline"
+        showBack={navigation?.canGoBack?.()}
+        onBack={() => navigation?.goBack?.()}
+      />
     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.contentContainer}>
       <View style={[styles.statusCard, { borderLeftColor: statusInfo.color }]}>
         <View style={[styles.statusIconWrap, { backgroundColor: statusInfo.color + '15' }]}>
@@ -241,7 +239,7 @@ export const SellerVerificationStatusScreen = ({ navigation, onRecheck }: any) =
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
   },
   screenHeader: {
     flexDirection: 'row',
@@ -266,17 +264,19 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   statusCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     padding: 22,
     alignItems: 'center',
     borderLeftWidth: 4,
     marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   statusIconWrap: {
     width: 88,
@@ -294,27 +294,29 @@ const styles = StyleSheet.create({
   },
   message: {
     fontSize: 14,
-    color: '#666',
+    color: COLORS.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
   },
   infoSection: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     padding: 20,
     marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.text,
     marginBottom: 16,
   },
   infoRow: {
     flexDirection: 'column',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: COLORS.border,
   },
   infoLabel: {
     fontSize: 12,
@@ -324,8 +326,9 @@ const styles = StyleSheet.create({
   },
   infoValue: {
     fontSize: 14,
-    color: '#333',
+    color: COLORS.text,
     lineHeight: 20,
+    fontWeight: '600',
   },
   rejectionBox: {
     backgroundColor: '#FFF3F3',
@@ -343,7 +346,7 @@ const styles = StyleSheet.create({
   },
   rejectionReason: {
     fontSize: 14,
-    color: '#666',
+    color: COLORS.textSecondary,
     lineHeight: 20,
   },
   actionsSection: {
@@ -351,7 +354,7 @@ const styles = StyleSheet.create({
   },
   contactButton: {
     backgroundColor: COLORS.primary,
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
     flexDirection: 'row',
     gap: 8,
@@ -361,21 +364,21 @@ const styles = StyleSheet.create({
   },
   contactButtonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
   },
   reapplyButton: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
     padding: 16,
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.primary,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}55`,
   },
   reapplyButtonText: {
     color: COLORS.primary,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
   },
   noteBox: {
     backgroundColor: '#FFF9E6',
@@ -386,18 +389,18 @@ const styles = StyleSheet.create({
   },
   noteTitle: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#FFA500',
     marginBottom: 8,
   },
   noteText: {
     fontSize: 13,
-    color: '#666',
+    color: COLORS.textSecondary,
     lineHeight: 18,
   },
   errorText: {
     fontSize: 16,
-    color: '#FF4444',
+    color: COLORS.error,
     textAlign: 'center',
     marginTop: 50,
   },

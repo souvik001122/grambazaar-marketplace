@@ -14,6 +14,7 @@ import { Order } from '../../types/index';
 import { COLORS } from '../../constants/colors';
 import { showAlert } from '../../utils/alert';
 import { isCompletedSale } from '../../utils/salesMetrics';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 type FilterTab = 'all' | 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
 
@@ -161,11 +162,14 @@ const AdminOrdersScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.screenHeader}>
-        <Ionicons name="receipt" size={22} color="#FFF" />
-        <Text style={styles.screenHeaderTitle}>Orders</Text>
-      </View>
+      <PremiumTopBar
+        title="Orders"
+        subtitle="Track and manage all marketplace orders"
+        icon="receipt"
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={onRefresh}
+        rightDisabled={refreshing}
+      />
       {/* Revenue Summary */}
       <View style={styles.revenueBanner}>
         <View>

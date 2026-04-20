@@ -5,10 +5,10 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   RefreshControl,
   BackHandler,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -18,6 +18,17 @@ import { Product } from '../../types/product.types';
 import { showAlert } from '../../utils/alert';
 import { COLORS } from '../../constants/colors';
 import { useFocusEffect } from '@react-navigation/native';
+import { appwriteConfig } from '../../config/appwrite';
+import { normalizeImageList, resolveImageUrl } from '../../services/storageService';
+import { PremiumImage } from '../../components/PremiumImage';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
+
+const PRODUCT_FILTER_TABS: Array<{ key: 'all' | 'active' | 'pending' | 'rejected'; label: string }> = [
+  { key: 'all', label: 'All' },
+  { key: 'active', label: 'Active' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'rejected', label: 'Rejected' },
+];
 
 const MyProductsScreen = ({ navigation, route }: any) => {
   const { user } = useAuth();
@@ -153,12 +164,15 @@ const MyProductsScreen = ({ navigation, route }: any) => {
 
   const renderProduct = ({ item }: { item: Product }) => {
     const statusBadge = getStatusBadge(item.status || 'pending');
+    const imageList = normalizeImageList(item.images);
+    const imageUrl = resolveImageUrl(appwriteConfig.productImagesBucketId, imageList[0]);
 
     return (
       <View style={styles.productCard}>
-        <Image 
-          source={{ uri: item.images?.[0] || 'https://via.placeholder.com/100' }} 
-          style={styles.productImage} 
+        <PremiumImage
+          uri={imageUrl}
+          style={styles.productImage}
+          variant="product"
         />
         
         <View style={styles.productInfo}>
@@ -224,25 +238,38 @@ const MyProductsScreen = ({ navigation, route }: any) => {
 
   return (
     <View style={styles.container}>
-      {/* Tabs */}
-      <View style={styles.tabsContainer}>
-        {['all', 'active', 'pending', 'rejected'].map((tab) => (
+      <PremiumTopBar
+        title="My Products"
+        subtitle="Manage listings, stock, and status"
+        icon="cube-outline"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={onRefresh}
+        rightDisabled={refreshing}
+      />
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabsContainer}
+        contentContainerStyle={styles.tabsContent}
+      >
+        {PRODUCT_FILTER_TABS.map((tab) => (
           <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === tab && styles.tabActive]}
-            onPress={() => setActiveTab(tab as any)}
+            key={tab.key}
+            style={[styles.tab, activeTab === tab.key && styles.tabActive]}
+            onPress={() => setActiveTab(tab.key)}
           >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </Text>
-            <View style={[styles.tabBadge, activeTab === tab && styles.tabBadgeActive]}>
-              <Text style={[styles.tabBadgeText, activeTab === tab && styles.tabBadgeTextActive]}>
-                {getTabCount(tab)}
+            <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>{tab.label}</Text>
+            <View style={[styles.tabBadge, activeTab === tab.key && styles.tabBadgeActive]}>
+              <Text style={[styles.tabBadgeText, activeTab === tab.key && styles.tabBadgeTextActive]}>
+                {getTabCount(tab.key)}
               </Text>
             </View>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {/* Products List */}
       {filteredProducts.length === 0 ? (
@@ -280,7 +307,7 @@ const MyProductsScreen = ({ navigation, route }: any) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
   },
   loadingContainer: {
     flex: 1,
@@ -288,37 +315,48 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tabsContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
+    maxHeight: 58,
+    backgroundColor: COLORS.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: COLORS.border,
+  },
+  tabsContent: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
   },
   tab: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 8,
+    minHeight: 36,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginRight: 8,
+    gap: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
   },
   tabActive: {
-    borderBottomWidth: 3,
-    borderBottomColor: COLORS.primary,
+    backgroundColor: `${COLORS.primary}16`,
+    borderColor: `${COLORS.primary}55`,
   },
   tabText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontWeight: '700',
   },
   tabTextActive: {
     color: COLORS.primary,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   tabBadge: {
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#E7E5E4',
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 10,
+    borderRadius: 999,
     minWidth: 24,
     alignItems: 'center',
   },
@@ -326,35 +364,37 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
   },
   tabBadgeText: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '600',
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    fontWeight: '700',
   },
   tabBadgeTextActive: {
     color: '#fff',
   },
   listContainer: {
-    padding: 16,
+    padding: 14,
   },
   productCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     marginBottom: 16,
     overflow: 'hidden',
     flexDirection: 'row',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   productImage: {
-    width: 120,
-    height: 150,
+    width: 112,
+    height: 146,
   },
   productInfo: {
     flex: 1,
-    padding: 12,
+    padding: 14,
   },
   statusBadge: {
     flexDirection: 'row',
@@ -362,25 +402,25 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 999,
     marginBottom: 8,
     gap: 4,
   },
   statusText: {
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: '700',
   },
   productName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.text,
     marginBottom: 4,
   },
   productPrice: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 17,
+    fontWeight: '800',
     color: COLORS.primary,
-    marginBottom: 8,
+    marginBottom: 9,
   },
   productStats: {
     flexDirection: 'row',
@@ -393,7 +433,7 @@ const styles = StyleSheet.create({
   },
   statText: {
     fontSize: 12,
-    color: '#666',
+    color: COLORS.textSecondary,
   },
   rejectionBox: {
     marginTop: 8,
@@ -419,9 +459,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   actionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
@@ -446,13 +486,13 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: '700',
+    color: COLORS.text,
     marginBottom: 8,
   },
   emptyText: {
     fontSize: 14,
-    color: '#666',
+    color: COLORS.textSecondary,
     textAlign: 'center',
     marginBottom: 24,
   },

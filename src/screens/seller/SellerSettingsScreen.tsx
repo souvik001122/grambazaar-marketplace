@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Linking,
   TextInput,
-  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -20,6 +19,8 @@ import { showAlert } from '../../utils/alert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadFile } from '../../services/storageService';
+import { PremiumImage } from '../../components/PremiumImage';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 type PaymentForm = {
   paymentUpiId: string;
@@ -197,6 +198,14 @@ const SellerSettingsScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+    <PremiumTopBar
+      title="Settings"
+      subtitle="Shop controls, payments, support, and account"
+      icon="settings-outline"
+      showBack={navigation?.canGoBack?.()}
+      onBack={() => navigation?.goBack?.()}
+    />
+
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 16 }}>
       {/* Profile Header */}
       <View style={styles.profileHeader}>
@@ -303,7 +312,12 @@ const SellerSettingsScreen = ({ navigation }: any) => {
             )}
           </TouchableOpacity>
           {!!paymentForm.paymentQrImageUrl && (
-            <Image source={{ uri: paymentForm.paymentQrImageUrl }} style={styles.qrPreview} />
+            <PremiumImage
+              uri={paymentForm.paymentQrImageUrl}
+              style={styles.qrPreview}
+              resizeMode="contain"
+              variant="qr"
+            />
           )}
 
           <Text style={styles.inputLabel}>Bank Account Holder</Text>
@@ -422,11 +436,18 @@ const SellerSettingsScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: COLORS.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   profileHeader: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    padding: 20, borderBottomWidth: 1, borderBottomColor: '#eee',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   avatar: {
     width: 60, height: 60, borderRadius: 30, backgroundColor: COLORS.primary,
@@ -434,52 +455,70 @@ const styles = StyleSheet.create({
   },
   avatarText: { fontSize: 24, fontWeight: '700', color: '#fff' },
   profileInfo: { flex: 1 },
-  profileName: { fontSize: 18, fontWeight: '700', color: '#333' },
-  profileEmail: { fontSize: 13, color: '#999', marginTop: 2 },
+  profileName: { fontSize: 18, fontWeight: '800', color: COLORS.text },
+  profileEmail: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
   verificationBadge: {
     flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start',
     paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, gap: 4, marginTop: 6,
   },
   verificationText: { fontSize: 12, fontWeight: '600' },
-  section: { marginTop: 20 },
+  section: { marginTop: 16 },
   sectionTitle: {
-    fontSize: 12, fontWeight: '600', color: '#999', letterSpacing: 1,
-    paddingHorizontal: 16, marginBottom: 8,
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textTertiary,
+    letterSpacing: 0.8,
+    paddingHorizontal: 18,
+    marginBottom: 8,
   },
   settingRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 14,
-    borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#eee',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.surface,
+    marginHorizontal: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   settingLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   settingText: { marginLeft: 12, flex: 1 },
-  settingLabel: { fontSize: 15, fontWeight: '500', color: '#333' },
-  settingDescription: { fontSize: 12, color: '#999', marginTop: 2 },
+  settingLabel: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  settingDescription: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
   menuItem: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: '#eee',
-  },
-  menuText: { flex: 1, marginLeft: 12, fontSize: 15, color: '#333' },
-  paymentCard: {
-    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
     marginHorizontal: 16,
+    marginBottom: 8,
     borderRadius: 12,
-    padding: 14,
     borderWidth: 1,
-    borderColor: '#eee',
+    borderColor: COLORS.border,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
   },
-  paymentInfoText: { fontSize: 12, color: '#666', marginBottom: 10 },
-  inputLabel: { fontSize: 12, fontWeight: '600', color: '#666', marginBottom: 6, marginTop: 4 },
+  menuText: { flex: 1, marginLeft: 12, fontSize: 14, color: COLORS.text, fontWeight: '600' },
+  paymentCard: {
+    backgroundColor: COLORS.surface,
+    marginHorizontal: 16,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  paymentInfoText: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 10 },
+  inputLabel: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 6, marginTop: 4 },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: '#fafafa',
+    backgroundColor: COLORS.card,
     marginBottom: 10,
-    color: '#333',
+    color: COLORS.text,
   },
   qrUploadButton: {
     flexDirection: 'row',
@@ -513,8 +552,15 @@ const styles = StyleSheet.create({
   savePaymentButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   logoutButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    margin: 20, padding: 14, backgroundColor: '#fff', borderRadius: 12,
-    borderWidth: 1, borderColor: COLORS.error, gap: 8,
+    marginHorizontal: 16,
+    marginTop: 18,
+    marginBottom: 10,
+    padding: 14,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: `${COLORS.error}55`,
+    gap: 8,
   },
   logoutText: { fontSize: 16, fontWeight: '600', color: COLORS.error },
   footer: { alignItems: 'center', paddingBottom: 32, paddingTop: 8 },

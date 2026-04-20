@@ -17,6 +17,7 @@ import { INDIAN_STATES } from '../../constants/regions';
 import { COLORS } from '../../constants/colors';
 import { searchMarketplaceProducts } from '../../services/productService';
 import { buildAutosuggestions } from '../../utils/autosuggest';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 const POPULAR_DISTRICTS = [
   'Jaipur',
@@ -107,10 +108,13 @@ const ExploreScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Ionicons name="compass-outline" size={22} color="#FFF" />
-        <Text style={styles.headerTitle}>Explore by Region</Text>
-      </View>
+      <PremiumTopBar
+        title="Explore by Region"
+        subtitle="Discover crafts by state, district, and village"
+        icon="compass-outline"
+        rightLabel="Reset"
+        onRightPress={clearAll}
+      />
 
       <View style={styles.filtersWrap}>
         <Text style={styles.label}>State</Text>

@@ -3,7 +3,6 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Image,
   Text,
   TextInput,
   TouchableOpacity,
@@ -17,6 +16,7 @@ import { getSellerByUserId, updateSeller } from '../../src/services/sellerServic
 import { uploadFile } from '../../src/services/storageService';
 import { Seller } from '../../src/types/seller.types';
 import { COLORS } from '../../src/constants/colors';
+import { PremiumImage } from '../../src/components/PremiumImage';
 
 type PaymentForm = {
   paymentUpiId: string;
@@ -199,7 +199,12 @@ export default function SellerProfileScreen() {
           </TouchableOpacity>
 
           {!!form.paymentQrImageUrl && (
-            <Image source={{ uri: form.paymentQrImageUrl }} style={styles.qrImage} />
+            <PremiumImage
+              uri={form.paymentQrImageUrl}
+              style={styles.qrImage}
+              resizeMode="contain"
+              variant="qr"
+            />
           )}
 
           <Text style={styles.label}>Bank Account Holder</Text>

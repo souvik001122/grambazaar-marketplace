@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
   useWindowDimensions,
   Linking,
 } from 'react-native';
@@ -19,12 +18,12 @@ import { Seller } from '../../types/seller.types';
 import { Product } from '../../types/product.types';
 import { Review } from '../../types/common.types';
 import { ProductCard } from '../../components/ProductCard';
-import { TrustBadge } from '../../components/TrustBadge';
 import { StarRating } from '../../components/StarRating';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
+import { PremiumImage } from '../../components/PremiumImage';
 import { getStateName } from '../../constants/regions';
 import { calculateTrustScore, getTrustDescription, getTrustScoreBreakdown, isTopArtisan } from '../../utils/trustScore';
-import { getImageUrl } from '../../services/storageService';
+import { normalizeImageList, resolveImageUrl } from '../../services/storageService';
 import { appwriteConfig } from '../../config/appwrite';
 import { BUYER_LAYOUT } from '../../constants/layout';
 import { formatRelativeTime } from '../../utils/formatting';
@@ -69,8 +68,28 @@ const getReviewContextTag = (comment?: string): string | null => {
   return null;
 };
 
+const INVALID_LOCATION_LABELS = new Set([
+  'na',
+  'n/a',
+  'none',
+  'null',
+  'undefined',
+  'unknown',
+  'not available',
+  '-',
+]);
+
+const sanitizeLocationLabel = (value?: string): string => {
+  const normalized = (value || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (INVALID_LOCATION_LABELS.has(normalized.toLowerCase())) {
+    return '';
+  }
+  return normalized;
+};
+
 const addUniqueLocationPart = (parts: string[], value?: string) => {
-  const trimmed = (value || '').trim();
+  const trimmed = sanitizeLocationLabel(value);
   if (!trimmed) return;
 
   const alreadyExists = parts.some((part) => part.toLowerCase() === trimmed.toLowerCase());
@@ -79,21 +98,23 @@ const addUniqueLocationPart = (parts: string[], value?: string) => {
   }
 };
 
-const getSellerPrimaryLocationLabel = (seller: Seller): string => {
-  const parts: string[] = [];
-  addUniqueLocationPart(parts, seller.village);
-  addUniqueLocationPart(parts, seller.district);
-  addUniqueLocationPart(parts, seller.city);
-  addUniqueLocationPart(parts, getStateName(seller.state));
-  return parts.join(', ');
-};
+const getSellerStandardAddressLabel = (seller: Seller): string => {
+  const fullParts: string[] = [];
+  addUniqueLocationPart(fullParts, seller.address);
+  addUniqueLocationPart(fullParts, seller.village);
+  addUniqueLocationPart(fullParts, seller.city);
+  addUniqueLocationPart(fullParts, seller.district);
+  addUniqueLocationPart(fullParts, getStateName(seller.state));
 
-const getSellerVerifiedLocationLabel = (seller: Seller): string => {
-  const parts: string[] = [];
-  addUniqueLocationPart(parts, seller.village);
-  addUniqueLocationPart(parts, seller.city);
-  addUniqueLocationPart(parts, seller.district);
-  return parts.join(', ') || getStateName(seller.state);
+  const fullLabel = fullParts.join(', ');
+  if (fullLabel && fullLabel.length <= 76) {
+    return fullLabel;
+  }
+
+  const compactParts: string[] = [];
+  addUniqueLocationPart(compactParts, seller.city || seller.district || seller.village);
+  addUniqueLocationPart(compactParts, getStateName(seller.state));
+  return compactParts.join(', ') || 'India';
 };
 
 const SellerProfileScreen = ({ route, navigation }: any) => {
@@ -293,31 +314,45 @@ const SellerProfileScreen = ({ route, navigation }: any) => {
   const trustBreakdown = getTrustScoreBreakdown(seller, { totalReviews: sellerReviewTotal });
   const topArtisan = isTopArtisan(seller, { totalReviews: sellerReviewTotal });
   const isVerifiedSeller = !!seller.verifiedBadge || seller.verificationStatus === 'approved';
-  const sellerPrimaryLocation = getSellerPrimaryLocationLabel(seller);
-  const sellerVerifiedLocation = getSellerVerifiedLocationLabel(seller);
-  const sellerPreviewImage = seller.verificationDocuments?.[0]
-    ? (seller.verificationDocuments[0].startsWith('http')
-      ? seller.verificationDocuments[0]
-      : getImageUrl(appwriteConfig.documentsBucketId, seller.verificationDocuments[0]))
-    : '';
+  const sellerAddressLabel = getSellerStandardAddressLabel(seller);
+  const sellerTrustTagLabel = isVerifiedSeller
+    ? 'Verified seller'
+    : trustScore >= 80
+      ? 'Trusted seller'
+      : 'Buyer protection';
+  const sellerPreviewImage = resolveImageUrl(
+    appwriteConfig.documentsBucketId,
+    normalizeImageList(seller.verificationDocuments)[0]
+  );
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: tabBarHeight }} showsVerticalScrollIndicator={false}>
       {/* Shop Header */}
       <View style={[styles.header, railStyle]}>
-        {sellerPreviewImage ? (
-          <Image source={{ uri: sellerPreviewImage }} style={styles.shopImage} resizeMode="cover" />
-        ) : (
-          <View style={styles.shopImagePlaceholder}>
-            <Ionicons name="storefront-outline" size={48} color={COLORS.textTertiary} />
-          </View>
+        {navigation.canGoBack() && (
+          <TouchableOpacity style={styles.headerBackButton} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+            <Ionicons name="arrow-back" size={20} color="#FFF" />
+          </TouchableOpacity>
         )}
+
+        <PremiumImage
+          uri={sellerPreviewImage}
+          style={styles.shopImage}
+          resizeMode="cover"
+          variant="shop"
+        />
         <View style={styles.headerInfo}>
           <View style={styles.nameRow}>
             <Text style={styles.shopName}>{seller.businessName}</Text>
             {isVerifiedSeller && (
               <Ionicons name="checkmark-circle" size={20} color={COLORS.verified} />
             )}
+          </View>
+          <View style={styles.headerBadgeRow}>
+            <View style={styles.craftTypeChip}>
+              <Ionicons name="hammer-outline" size={12} color={COLORS.primaryDark} />
+              <Text style={styles.craftTypeChipText}>{seller.craftType}</Text>
+            </View>
             {topArtisan && (
               <View style={styles.topArtisanChip}>
                 <Ionicons name="ribbon-outline" size={12} color="#92400E" />
@@ -325,25 +360,28 @@ const SellerProfileScreen = ({ route, navigation }: any) => {
               </View>
             )}
           </View>
-          <Text style={styles.craftType}>{seller.craftType}</Text>
-          <View style={styles.locationRow}>
-            <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
-            <Text style={styles.location}>
-              {sellerPrimaryLocation}
-            </Text>
+          <View style={styles.headerTagRow}>
+            <View style={[styles.headerTag, styles.headerAddressTag]}>
+              <Ionicons name="location-outline" size={12} color={COLORS.primary} />
+              <Text style={[styles.headerTagText, styles.headerAddressText]}>
+                {sellerAddressLabel}
+              </Text>
+            </View>
+            <View style={[styles.headerTag, styles.headerTrustTag]}>
+              <Ionicons
+                name={isVerifiedSeller ? 'shield-checkmark-outline' : 'shield-outline'}
+                size={12}
+                color={COLORS.secondaryDark}
+              />
+              <Text style={[styles.headerTagText, styles.headerTrustTagText]}>{sellerTrustTagLabel}</Text>
+            </View>
           </View>
-          <Text style={styles.locationTrustTag}>
-            Verified Location ({sellerVerifiedLocation})
-          </Text>
         </View>
       </View>
 
       <View style={[styles.trustInsightCard, railStyle]}>
         <View style={styles.trustInsightTop}>
           <Text style={styles.trustInsightHeaderTitle}>Why you can trust this seller</Text>
-          <View style={styles.trustScoreBadge}>
-            <Text style={styles.trustScoreBadgeText}>{trustScore}</Text>
-          </View>
         </View>
         <View style={styles.trustHero}>
           <Text style={styles.trustHeroLabel}>Trust Score</Text>
@@ -361,7 +399,6 @@ const SellerProfileScreen = ({ route, navigation }: any) => {
           <Text style={styles.trustReasonText}>
             Shop location verified
             {sellerDistanceKm !== null ? ` (${sellerDistanceKm} km away)` : ''}
-            {seller.address ? ` - ${seller.address}` : ''}
           </Text>
         </View>
         <View style={styles.trustReasonRow}>
@@ -405,13 +442,6 @@ const SellerProfileScreen = ({ route, navigation }: any) => {
             </View>
           ))}
           <Text style={styles.breakdownTotal}>Total trust score: {trustBreakdown.total}/100</Text>
-        </View>
-
-        <View style={styles.platformTrustStrip}>
-          <Ionicons name="shield-checkmark" size={16} color={COLORS.secondaryDark} />
-          <Text style={styles.platformTrustStripText}>
-            {'GramBazaar Protection:\n• Pay only after seller confirms\n• Track orders via courier\n• Report issues anytime'}
-          </Text>
         </View>
 
         <TouchableOpacity
@@ -484,11 +514,12 @@ const SellerProfileScreen = ({ route, navigation }: any) => {
           <Text style={styles.statLabel}>Rating</Text>
         </View>
 
-        <View style={[styles.statCard, styles.trustStatCard]}>
-          <View style={styles.trustPill}>
-            <Text style={styles.trustPillText}>{trustScore}</Text>
+        <View style={styles.statCard}>
+          <View style={styles.statIconWrap}>
+            <Ionicons name="chatbubble-ellipses-outline" size={14} color={COLORS.primaryDark} />
           </View>
-          <Text style={styles.statLabel}>Trust</Text>
+          <Text style={styles.statValue}>{sellerReviewTotal}</Text>
+          <Text style={styles.statLabel}>Reviews</Text>
         </View>
       </View>
 
@@ -565,32 +596,110 @@ const styles = StyleSheet.create({
     padding: 18,
     marginHorizontal: 16,
     marginTop: 10,
-    borderRadius: 16,
-    backgroundColor: COLORS.surface,
+    borderRadius: 18,
+    backgroundColor: '#FFFCF7',
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: `${COLORS.primary}25`,
     shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+    alignItems: 'flex-start',
+    position: 'relative',
   },
-  shopImage: { width: 80, height: 80, borderRadius: 12, backgroundColor: COLORS.card },
+  headerBackButton: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    zIndex: 3,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shopImage: {
+    width: 86,
+    height: 86,
+    borderRadius: 14,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}28`,
+  },
   shopImagePlaceholder: {
-    width: 80, height: 80, borderRadius: 12, backgroundColor: COLORS.card,
+    width: 86, height: 86, borderRadius: 14, backgroundColor: COLORS.card,
     alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}28`,
   },
-  headerInfo: { flex: 1, marginLeft: 16, justifyContent: 'center' },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  shopName: { fontSize: 20, fontWeight: 'bold', color: COLORS.text },
-  craftType: { fontSize: 14, color: COLORS.primary, fontWeight: '600', marginBottom: 6 },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  location: { fontSize: 13, color: COLORS.textSecondary },
-  locationTrustTag: {
-    marginTop: 4,
+  headerInfo: { flex: 1, marginLeft: 14, justifyContent: 'center' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' },
+  shopName: { fontSize: 21, fontWeight: '800', color: COLORS.text, lineHeight: 27, flexShrink: 1 },
+  headerBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  craftTypeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}38`,
+    backgroundColor: `${COLORS.primary}12`,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  craftTypeChipText: {
     fontSize: 12,
-    color: COLORS.secondaryDark,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+  },
+  headerTagRow: {
+    marginTop: 2,
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
+  },
+  headerTag: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}30`,
+    backgroundColor: `${COLORS.primary}10`,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  headerTagText: {
+    fontSize: 12,
+    color: COLORS.primary,
     fontWeight: '700',
+    flexShrink: 1,
+  },
+  headerAddressTag: {
+    width: '100%',
+  },
+  headerAddressText: {
+    flex: 1,
+    lineHeight: 17,
+    color: COLORS.primaryDark,
+  },
+  headerTrustTag: {
+    borderColor: `${COLORS.secondary}35`,
+    backgroundColor: `${COLORS.secondary}10`,
+  },
+  headerTrustTagText: {
+    color: COLORS.secondaryDark,
   },
   topArtisanChip: {
     flexDirection: 'row',
@@ -636,10 +745,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     minHeight: 78,
   },
-  trustStatCard: {
-    borderColor: `${COLORS.primary}55`,
-    backgroundColor: `${COLORS.primary}14`,
-  },
   statIconWrap: {
     width: 24,
     height: 24,
@@ -648,20 +753,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: `${COLORS.primary}22`,
     marginBottom: 5,
-  },
-  trustPill: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.primary,
-    marginBottom: 4,
-  },
-  trustPillText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '800',
   },
   statValue: { fontSize: 19, fontWeight: '800', color: COLORS.text },
   statLabel: { fontSize: 11, color: COLORS.textSecondary, marginTop: 4, fontWeight: '700' },
@@ -675,7 +766,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     backgroundColor: COLORS.surface,
   },
-  sectionTitle: { fontSize: 17, fontWeight: 'bold', color: COLORS.text, marginBottom: 12 },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginBottom: 10 },
   trustInsightCard: {
     marginTop: 10,
     marginHorizontal: 16,
@@ -692,7 +783,7 @@ const styles = StyleSheet.create({
   },
   trustInsightTop: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     alignItems: 'center',
     marginBottom: 10,
     gap: 10,
@@ -702,22 +793,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '800',
     color: COLORS.text,
-  },
-  trustScoreBadge: {
-    minWidth: 52,
-    height: 34,
-    paddingHorizontal: 10,
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: `${COLORS.primary}44`,
-    backgroundColor: `${COLORS.primary}12`,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  trustScoreBadgeText: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: COLORS.primaryDark,
   },
   trustInsightText: {
     fontSize: 13,
@@ -837,25 +912,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.primaryDark,
   },
-  platformTrustStrip: {
-    marginTop: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: `${COLORS.secondary}30`,
-    backgroundColor: `${COLORS.secondary}10`,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  platformTrustStripText: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.secondaryDark,
-    lineHeight: 17,
-  },
   localityButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -902,16 +958,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  description: { fontSize: 14, color: COLORS.textSecondary, lineHeight: 22 },
+  description: { fontSize: 14, color: COLORS.textSecondary, lineHeight: 21 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   emptyProducts: { alignItems: 'center', paddingVertical: 40 },
   emptyText: { fontSize: 14, color: COLORS.textTertiary, marginTop: 8 },
   reviewCard: {
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 12,
+    borderRadius: 10,
     padding: 12,
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.card,
     marginBottom: 8,
   },
   reviewHeader: {
@@ -942,7 +998,7 @@ const styles = StyleSheet.create({
   reviewComment: {
     fontSize: 13,
     color: COLORS.textSecondary,
-    lineHeight: 18,
+    lineHeight: 19,
   },
 });
 

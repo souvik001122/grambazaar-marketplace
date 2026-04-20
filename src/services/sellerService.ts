@@ -228,6 +228,26 @@ const parseUnknownAttribute = (message: string): string | null => {
   return match?.[1] || null;
 };
 
+const isNotFoundError = (error: unknown): boolean => {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const maybe = error as { code?: unknown; message?: unknown; type?: unknown };
+  if (typeof maybe.code === 'number' && maybe.code === 404) {
+    return true;
+  }
+
+  const message = typeof maybe.message === 'string' ? maybe.message.toLowerCase() : '';
+  const type = typeof maybe.type === 'string' ? maybe.type.toLowerCase() : '';
+
+  return (
+    type.includes('not_found') ||
+    message.includes('could not be found') ||
+    message.includes('document with the requested id')
+  );
+};
+
 const isSchemaMismatchError = (message: string): boolean => {
   const lower = (message || '').toLowerCase();
   return (
@@ -384,6 +404,9 @@ export const getSellerById = async (sellerId: string): Promise<Seller | null> =>
     );
     return doc as unknown as Seller;
   } catch (error) {
+    if (isNotFoundError(error)) {
+      return null;
+    }
     console.error('Error fetching seller:', error);
     return null;
   }

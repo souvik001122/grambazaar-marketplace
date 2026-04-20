@@ -12,8 +12,10 @@ import {
   Platform,
   Modal,
   Pressable,
+  InteractionManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Image as ExpoImage } from 'expo-image';
 import { ProductCard } from '../../components/ProductCard';
 import { SellerCard } from '../../components/SellerCard';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
@@ -28,18 +30,76 @@ import { BUYER_LAYOUT } from '../../constants/layout';
 import * as Location from 'expo-location';
 import { useAuth } from '../../context/AuthContext';
 import { useCartStore } from '../../stores/cartStore';
-import { calculateTrustScore, isTopArtisan } from '../../utils/trustScore';
+import {
+  rankProductsByBestRated,
+  rankProductsByFreshArrivals,
+  rankProductsByTrending,
+  rankSellersForTopArtisans,
+} from '../../utils/homeRanking';
+import { normalizeImageList, resolveImageUrl } from '../../services/storageService';
+import { appwriteConfig } from '../../config/appwrite';
 
-const FRESH_PAGE_SIZE = 8;
+const FRESH_PAGE_SIZE = 6;
 const DEFAULT_REGION = 'Haryana';
 const ALL_INDIA_REGION = 'All India';
 const REGION_BOOTSTRAP_TIMEOUT_MS = 1200;
+const CURATED_TOP_RATED_FETCH_SIZE = 60;
+const CURATED_TRENDING_FETCH_SIZE = 80;
+const HOME_PREFETCH_COUNT = 8;
+const HOME_CURATED_PREFETCH_COUNT = 4;
+const HOME_SELLER_PREFETCH_COUNT = 4;
+const HOME_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
+
+type HomeSnapshot = {
+  userId: string;
+  selectedRegion: string;
+  autoRegionLabel: string;
+  featuredProducts: Product[];
+  trendingProducts: Product[];
+  topSellers: Seller[];
+  recentProducts: Product[];
+  curatedMode: 'top-rated' | 'trending';
+  freshPage: number;
+  freshHasMore: boolean;
+  productsFallbackActive: boolean;
+  cachedAt: number;
+};
+
+let HOME_SNAPSHOT_CACHE: HomeSnapshot | null = null;
+
+const toHomePreviewUri = (rawUri: string): string => {
+  if (!rawUri || !/^https?:\/\//i.test(rawUri)) {
+    return rawUri;
+  }
+
+  if (!rawUri.includes('/storage/buckets/') || !rawUri.includes('/files/')) {
+    return rawUri;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUri);
+  } catch {
+    return rawUri;
+  }
+
+  if (!parsed.pathname.endsWith('/view') && !parsed.pathname.endsWith('/preview')) {
+    return rawUri;
+  }
+
+  parsed.pathname = parsed.pathname.replace(/\/(view|preview)$/i, '/preview');
+  parsed.searchParams.set('quality', '58');
+  parsed.searchParams.set('output', 'webp');
+  parsed.searchParams.set('width', '420');
+  return parsed.toString();
+};
 
 const HomeScreen = ({ navigation }: any) => {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const isCompact = screenHeight < 760;
   const isLargeScreen = screenWidth >= BUYER_LAYOUT.railBreakpoint;
   const { user } = useAuth();
+  const cacheUserKey = user?.$id || 'guest';
   const cartCount = useCartStore((s) => s.items.reduce((t, i) => t + i.quantity, 0));
   const [selectedRegion, setSelectedRegion] = useState(DEFAULT_REGION);
   const [autoRegionLabel, setAutoRegionLabel] = useState('');
@@ -59,6 +119,33 @@ const HomeScreen = ({ navigation }: any) => {
   const [startupRegionResolved, setStartupRegionResolved] = useState(Platform.OS === 'web');
   const contentRailStyle = isLargeScreen ? styles.contentRailWide : undefined;
   const initialLoadDoneRef = useRef(false);
+  const prefetchedUrisRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!HOME_SNAPSHOT_CACHE) {
+      return;
+    }
+
+    const snapshotExpired = Date.now() - HOME_SNAPSHOT_CACHE.cachedAt > HOME_SNAPSHOT_TTL_MS;
+    const wrongUser = HOME_SNAPSHOT_CACHE.userId !== cacheUserKey;
+
+    if (snapshotExpired || wrongUser) {
+      return;
+    }
+
+    setSelectedRegion(HOME_SNAPSHOT_CACHE.selectedRegion);
+    setAutoRegionLabel(HOME_SNAPSHOT_CACHE.autoRegionLabel);
+    setFeaturedProducts(HOME_SNAPSHOT_CACHE.featuredProducts);
+    setTrendingProducts(HOME_SNAPSHOT_CACHE.trendingProducts);
+    setTopSellers(HOME_SNAPSHOT_CACHE.topSellers);
+    setRecentProducts(HOME_SNAPSHOT_CACHE.recentProducts);
+    setCuratedMode(HOME_SNAPSHOT_CACHE.curatedMode);
+    setFreshPage(HOME_SNAPSHOT_CACHE.freshPage);
+    setFreshHasMore(HOME_SNAPSHOT_CACHE.freshHasMore);
+    setProductsFallbackActive(HOME_SNAPSHOT_CACHE.productsFallbackActive);
+    initialLoadDoneRef.current = true;
+    setLoading(false);
+  }, [cacheUserKey]);
 
   const navigateToBuyerTab = useCallback(
     (tabName: string, params?: any) => {
@@ -99,10 +186,10 @@ const HomeScreen = ({ navigation }: any) => {
       const effectiveRegionFilter = selectedRegion === ALL_INDIA_REGION ? undefined : selectedRegion;
 
       const [featured, recent, sellers, trending] = await Promise.all([
-        getProducts({ sortBy: 'rating', region: effectiveRegionFilter }, 1, 6),
+        getProducts({ sortBy: 'rating', region: effectiveRegionFilter }, 1, CURATED_TOP_RATED_FETCH_SIZE),
         getProducts({ sortBy: 'newest', region: effectiveRegionFilter }, 1, FRESH_PAGE_SIZE),
         effectiveRegionFilter ? getSellersByRegion(effectiveRegionFilter) : getTopVerifiedSellers(200),
-        getProducts({ sortBy: 'trending', region: effectiveRegionFilter }, 1, 8),
+        getProducts({ sortBy: 'trending', region: effectiveRegionFilter }, 1, CURATED_TRENDING_FETCH_SIZE),
       ]);
 
       const noRegionProducts =
@@ -111,28 +198,40 @@ const HomeScreen = ({ navigation }: any) => {
       const [featuredResolved, recentResolved, trendingResolved] =
         noRegionProducts
           ? await Promise.all([
-              getProducts({ sortBy: 'rating' }, 1, 6).catch(() => featured),
+              getProducts({ sortBy: 'rating' }, 1, CURATED_TOP_RATED_FETCH_SIZE).catch(() => featured),
               getProducts({ sortBy: 'newest' }, 1, FRESH_PAGE_SIZE).catch(() => recent),
-              getProducts({ sortBy: 'trending' }, 1, 8).catch(() => trending),
+              getProducts({ sortBy: 'trending' }, 1, CURATED_TRENDING_FETCH_SIZE).catch(() => trending),
             ])
           : [featured, recent, trending];
 
+      const rankedFeaturedProducts = rankProductsByBestRated(featuredResolved.data).slice(0, 4);
+      const rankedTrendingProducts = rankProductsByTrending(trendingResolved.data).slice(0, 4);
+      const rankedFreshProducts = rankProductsByFreshArrivals(recentResolved.data);
+      const rankedSellers = rankSellersForTopArtisans(sellers).slice(0, 4);
+
       setProductsFallbackActive(noRegionProducts);
-      setFeaturedProducts(featuredResolved.data);
-      setRecentProducts(recentResolved.data);
-      setTrendingProducts(trendingResolved.data.length ? trendingResolved.data : featuredResolved.data);
-      const rankedSellers = [...sellers].sort((a, b) => {
-        const aTop = isTopArtisan(a) ? 1 : 0;
-        const bTop = isTopArtisan(b) ? 1 : 0;
-        if (bTop !== aTop) {
-          return bTop - aTop;
-        }
-        return calculateTrustScore(b) - calculateTrustScore(a);
-      });
-      setTopSellers(rankedSellers.slice(0, 6));
+      setFeaturedProducts(rankedFeaturedProducts);
+      setRecentProducts(rankedFreshProducts);
+      setTrendingProducts(rankedTrendingProducts.length ? rankedTrendingProducts : rankedFeaturedProducts);
+      setTopSellers(rankedSellers);
       setFreshPage(1);
       setFreshHasMore(recentResolved.hasMore);
       initialLoadDoneRef.current = true;
+
+      HOME_SNAPSHOT_CACHE = {
+        userId: cacheUserKey,
+        selectedRegion,
+        autoRegionLabel,
+        featuredProducts: rankedFeaturedProducts,
+        trendingProducts: rankedTrendingProducts.length ? rankedTrendingProducts : rankedFeaturedProducts,
+        topSellers: rankedSellers,
+        recentProducts: rankedFreshProducts,
+        curatedMode,
+        freshPage: 1,
+        freshHasMore: recentResolved.hasMore,
+        productsFallbackActive: noRegionProducts,
+        cachedAt: Date.now(),
+      };
     } catch (err) {
       console.error('Error loading home data:', err);
       setProductsFallbackActive(false);
@@ -141,7 +240,7 @@ const HomeScreen = ({ navigation }: any) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedRegion]);
+  }, [autoRegionLabel, cacheUserKey, curatedMode, selectedRegion]);
 
   useEffect(() => {
     if (!startupRegionResolved) {
@@ -150,6 +249,53 @@ const HomeScreen = ({ navigation }: any) => {
 
     loadInitialData({ blocking: !initialLoadDoneRef.current });
   }, [loadInitialData, startupRegionResolved]);
+
+  useEffect(() => {
+    const freshUris = recentProducts
+      .slice(0, HOME_PREFETCH_COUNT)
+      .map((product) => {
+        const imageList = normalizeImageList((product as any).images);
+        const raw = resolveImageUrl(appwriteConfig.productImagesBucketId, imageList[0]);
+        return toHomePreviewUri(raw);
+      })
+      .filter(Boolean);
+
+    const curatedSeed = (curatedMode === 'top-rated' ? featuredProducts : trendingProducts)
+      .slice(0, HOME_CURATED_PREFETCH_COUNT)
+      .map((product) => {
+        const imageList = normalizeImageList((product as any).images);
+        const raw = resolveImageUrl(appwriteConfig.productImagesBucketId, imageList[0]);
+        return toHomePreviewUri(raw);
+      })
+      .filter(Boolean);
+
+    const sellerUris = topSellers
+      .slice(0, HOME_SELLER_PREFETCH_COUNT)
+      .map((seller) => {
+        const docs = normalizeImageList((seller as any).verificationDocuments);
+        const raw = resolveImageUrl(appwriteConfig.documentsBucketId, docs[0]);
+        return toHomePreviewUri(raw);
+      })
+      .filter(Boolean);
+
+    const candidateUris = Array.from(new Set([...freshUris, ...curatedSeed, ...sellerUris]));
+
+    const newUris = candidateUris.filter((uri) => !prefetchedUrisRef.current.has(uri));
+
+    if (newUris.length === 0) {
+      return;
+    }
+
+    newUris.forEach((uri) => prefetchedUrisRef.current.add(uri));
+
+    const task = InteractionManager.runAfterInteractions(() => {
+      ExpoImage.prefetch(newUris, 'memory-disk').catch(() => {
+        // Prefetch is best-effort; ignore failures to keep feed responsive.
+      });
+    });
+
+    return () => task.cancel();
+  }, [curatedMode, featuredProducts, recentProducts, topSellers, trendingProducts]);
 
   useEffect(() => {
     let active = true;
@@ -254,7 +400,7 @@ const HomeScreen = ({ navigation }: any) => {
           }
         }
 
-        return merged;
+        return rankProductsByFreshArrivals(merged);
       });
 
       setFreshPage(nextPage);
@@ -346,8 +492,30 @@ const HomeScreen = ({ navigation }: any) => {
   );
 
   const renderFreshProductCard = useCallback(
-    (item: Product) => (
-      <View key={item.$id} style={styles.freshGridItem}>
+    ({ item }: { item: Product }) => (
+      <View style={styles.freshGridItem}>
+        <ProductCard
+          product={item}
+          performanceMode="list"
+          fullWidth
+          variant="default"
+          fallbackRegionLabel={activeRegionLabel}
+          onPress={() => handleProductPress(item)}
+        />
+      </View>
+    ),
+    [activeRegionLabel, handleProductPress]
+  );
+
+  const renderCuratedProductCard = useCallback(
+    ({ item }: { item: Product }) => (
+      <View
+        style={[
+          styles.horizontalCard,
+          isCompact && styles.horizontalCardCompact,
+          { width: featuredCardWidth },
+        ]}
+      >
         <ProductCard
           product={item}
           performanceMode="list"
@@ -358,7 +526,7 @@ const HomeScreen = ({ navigation }: any) => {
         />
       </View>
     ),
-    [activeRegionLabel, handleProductPress]
+    [activeRegionLabel, featuredCardWidth, handleProductPress, isCompact]
   );
 
   if (loading && !refreshing) {
@@ -381,15 +549,19 @@ const HomeScreen = ({ navigation }: any) => {
     <View style={styles.container}>
       <View style={styles.pageAura} pointerEvents="none" />
       <FlatList
-        data={[{ id: 'home-content' }]}
-        keyExtractor={(item) => item.id}
-        renderItem={() => null}
-        removeClippedSubviews
+        data={recentProducts}
+        keyExtractor={(item) => item.$id}
+        renderItem={renderFreshProductCard}
+        numColumns={2}
+        columnWrapperStyle={styles.freshGridRow}
+        removeClippedSubviews={Platform.OS === 'android'}
         initialNumToRender={2}
         maxToRenderPerBatch={2}
         windowSize={3}
-        updateCellsBatchingPeriod={80}
+        updateCellsBatchingPeriod={140}
         showsVerticalScrollIndicator={false}
+        onEndReached={loadMoreFreshProducts}
+        onEndReachedThreshold={0.2}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -610,31 +782,19 @@ const HomeScreen = ({ navigation }: any) => {
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView
+                <FlatList
                   horizontal
+                  data={curatedProducts}
+                  keyExtractor={(item) => item.$id}
                   showsHorizontalScrollIndicator={false}
+                  removeClippedSubviews={Platform.OS === 'android'}
+                  initialNumToRender={2}
+                  maxToRenderPerBatch={2}
+                  windowSize={3}
+                  updateCellsBatchingPeriod={120}
                   contentContainerStyle={styles.horizontalList}
-                >
-                  {curatedProducts.map((item) => (
-                    <View
-                      key={item.$id}
-                      style={[
-                        styles.horizontalCard,
-                        isCompact && styles.horizontalCardCompact,
-                        { width: featuredCardWidth },
-                      ]}
-                    >
-                      <ProductCard
-                        product={item}
-                        performanceMode="list"
-                        fullWidth
-                        variant="premium"
-                        fallbackRegionLabel={activeRegionLabel}
-                        onPress={() => handleProductPress(item)}
-                      />
-                    </View>
-                  ))}
-                </ScrollView>
+                  renderItem={renderCuratedProductCard}
+                />
               </View>
             )}
 
@@ -709,42 +869,34 @@ const HomeScreen = ({ navigation }: any) => {
                   <Text style={styles.seeAll}>See All</Text>
                 </TouchableOpacity>
               </View>
-
-              {recentProducts.length > 0 ? (
-                <>
-                  <View style={styles.freshGridWrap}>{recentProducts.map(renderFreshProductCard)}</View>
-                  {loadingMore ? (
-                    <View style={styles.loadMoreFooter}>
-                      <ActivityIndicator size="small" color={COLORS.primary} />
-                    </View>
-                  ) : freshHasMore ? (
-                    <TouchableOpacity style={styles.freshLoadMoreButton} onPress={loadMoreFreshProducts}>
-                      <Text style={styles.freshLoadMoreText}>Load More</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </>
-              ) : (
-                <View style={styles.freshEmptyWrap}>
-                  <Ionicons name="leaf-outline" size={28} color={COLORS.textTertiary} />
-                  <Text style={styles.emptySubtext}>No fresh products available yet.</Text>
-                </View>
-              )}
             </View>
           </>
         }
         ListEmptyComponent={
-          <View style={[styles.emptySection, contentRailStyle]}>
-            <Ionicons name="leaf-outline" size={48} color={COLORS.textTertiary} />
-            <Text style={styles.emptyText}>No products available yet</Text>
-            <Text style={styles.emptySubtext}>
-              Check back soon for fresh artisan products
-            </Text>
+          <View style={[styles.sectionPanel, isCompact && styles.sectionCompact, contentRailStyle]}>
+            <View style={styles.freshEmptyWrap}>
+              <Ionicons name="leaf-outline" size={28} color={COLORS.textTertiary} />
+              <Text style={styles.emptySubtext}>No fresh products available yet.</Text>
+            </View>
           </View>
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.loadMoreFooter}>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            </View>
+          ) : freshHasMore ? (
+            <TouchableOpacity style={styles.freshLoadMoreButton} onPress={loadMoreFreshProducts}>
+              <Text style={styles.freshLoadMoreText}>Load More</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.freshListBottomSpace} />
+          )
         }
         contentContainerStyle={[
           styles.listContent,
           isLargeScreen && styles.listContentWide,
-          { paddingBottom: 0 },
+          { paddingBottom: 12 },
         ]}
       />
 
@@ -1316,11 +1468,12 @@ const styles = StyleSheet.create({
   horizontalCardCompact: {
     width: 1,
   },
-  freshGridWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+  freshGridList: {
     marginTop: 2,
+  },
+  freshGridRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   freshGridItem: {
     width: '49.2%',
@@ -1356,6 +1509,9 @@ const styles = StyleSheet.create({
   },
   loadMoreFooter: {
     paddingVertical: 12,
+  },
+  freshListBottomSpace: {
+    height: 6,
   },
   listContent: {
     paddingHorizontal: 8,

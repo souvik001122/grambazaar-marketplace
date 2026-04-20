@@ -7,7 +7,6 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
-  Image,
   Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +22,7 @@ import { getSellerByUserId, updateSeller } from '../../services/sellerService';
 import { uploadFile } from '../../services/storageService';
 import { getProductsBySeller } from '../../services/productService';
 import { getUnreadCount } from '../../services/notificationService';
+import { PremiumImage } from '../../components/PremiumImage';
 
 const UPI_ID_REGEX = /^[a-zA-Z0-9._-]{2,}@[a-zA-Z]{2,}$/;
 const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
@@ -463,7 +463,12 @@ const ProfileScreen = ({ navigation }: any) => {
         <View style={styles.avatarWrap}>
           <TouchableOpacity style={styles.avatarContainer} onPress={handleOpenProfileImage} activeOpacity={0.9}>
             {profileImageUri ? (
-              <Image source={{ uri: profileImageUri }} style={styles.avatarImage} />
+              <PremiumImage
+                uri={profileImageUri}
+                style={styles.avatarImage}
+                resizeMode="cover"
+                variant="avatar"
+              />
             ) : (
               <Text style={styles.avatarText}>
                 {(profileName || user.name || 'U').charAt(0).toUpperCase()}
@@ -750,10 +755,11 @@ const ProfileScreen = ({ navigation }: any) => {
               </TouchableOpacity>
 
               {!!paymentQrImageUrl && (
-                <Image
-                  source={{ uri: paymentQrImageUrl }}
+                <PremiumImage
+                  uri={paymentQrImageUrl}
                   style={styles.qrPreview}
                   resizeMode="contain"
+                  variant="qr"
                 />
               )}
 
@@ -820,7 +826,12 @@ const ProfileScreen = ({ navigation }: any) => {
             <Ionicons name="close" size={24} color="#FFF" />
           </TouchableOpacity>
           {!!profileImageUri && (
-            <Image source={{ uri: profileImageUri }} style={styles.previewImage} resizeMode="contain" />
+            <PremiumImage
+              uri={profileImageUri}
+              style={styles.previewImage}
+              resizeMode="contain"
+              variant="avatar"
+            />
           )}
         </View>
       </Modal>

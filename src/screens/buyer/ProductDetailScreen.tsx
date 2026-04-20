@@ -4,12 +4,10 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Image,
   TouchableOpacity,
   ActivityIndicator,
   FlatList,
   useWindowDimensions,
-  Linking,
   Modal,
 } from 'react-native';
 import { PinchGestureHandler, PanGestureHandler, State, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -26,8 +24,8 @@ import { Product } from '../../types/product.types';
 import { Review } from '../../types/common.types';
 import { Seller } from '../../types/seller.types';
 import { StarRating } from '../../components/StarRating';
-import { TrustBadge } from '../../components/TrustBadge';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
+import { PremiumImage } from '../../components/PremiumImage';
 import { formatPrice, formatRelativeTime } from '../../utils/formatting';
 import { getStateName } from '../../constants/regions';
 import { normalizeImageList, resolveImageUrl } from '../../services/storageService';
@@ -78,8 +76,42 @@ const getReviewContextTag = (comment?: string): string | null => {
   return null;
 };
 
+const INVALID_LOCATION_LABELS = new Set([
+  'na',
+  'n/a',
+  'none',
+  'null',
+  'undefined',
+  'unknown',
+  'not available',
+  '-',
+]);
+
+const sanitizeLocationLabel = (value?: string): string => {
+  const normalized = (value || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (INVALID_LOCATION_LABELS.has(normalized.toLowerCase())) {
+    return '';
+  }
+  return normalized;
+};
+
+const toTitleCaseLabel = (value?: string): string => {
+  const normalized = sanitizeLocationLabel(value)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return '';
+
+  return normalized
+    .split(' ')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+};
+
 const pushUniqueLabel = (parts: string[], value?: string) => {
-  const trimmed = (value || '').trim();
+  const trimmed = sanitizeLocationLabel(value);
   if (!trimmed) return;
 
   const exists = parts.some((part) => part.toLowerCase() === trimmed.toLowerCase());
@@ -88,14 +120,41 @@ const pushUniqueLabel = (parts: string[], value?: string) => {
   }
 };
 
-const getSellerSecondaryAddress = (seller: Seller | null): string => {
-  if (!seller) return '';
+const getStandardProductAddress = (
+  product: Product,
+  seller: Seller | null,
+  fallbackState: string
+): string => {
+  const detailedParts: string[] = [];
 
-  const parts: string[] = [];
-  pushUniqueLabel(parts, seller.village);
-  pushUniqueLabel(parts, seller.district);
-  pushUniqueLabel(parts, seller.city);
-  return parts.join(', ');
+  if (seller) {
+    pushUniqueLabel(detailedParts, seller.address);
+    pushUniqueLabel(detailedParts, seller.village);
+    pushUniqueLabel(detailedParts, seller.city);
+    pushUniqueLabel(detailedParts, seller.district);
+    pushUniqueLabel(detailedParts, getStateName(seller.state));
+  }
+
+  if (detailedParts.length === 0) {
+    pushUniqueLabel(detailedParts, product.sellerLocationLabel);
+  }
+
+  const detailedAddress = detailedParts.join(', ');
+  if (detailedAddress && detailedAddress.length <= 64) {
+    return detailedAddress;
+  }
+
+  const shortParts: string[] = [];
+  if (seller) {
+    pushUniqueLabel(shortParts, seller.city || seller.district || seller.village);
+    pushUniqueLabel(shortParts, getStateName(seller.state));
+  }
+
+  if (shortParts.length > 0) {
+    return shortParts.join(', ');
+  }
+
+  return fallbackState || 'India';
 };
 
 const ProductDetailScreen = ({ route, navigation }: any) => {
@@ -347,99 +406,6 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
     }
   };
 
-  const openSellerMap = async () => {
-    if (!seller) return;
-
-    const hasCoordinates =
-      typeof seller.latitude === 'number' &&
-      typeof seller.longitude === 'number' &&
-      !Number.isNaN(seller.latitude) &&
-      !Number.isNaN(seller.longitude);
-
-    const placeText = [seller.businessName, seller.address, seller.city, seller.district, seller.state]
-      .filter(Boolean)
-      .join(', ');
-
-    const mapUrl = hasCoordinates
-      ? `https://www.google.com/maps?q=${seller.latitude},${seller.longitude}`
-      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(placeText)}`;
-
-    const canOpen = await Linking.canOpenURL(mapUrl);
-    if (!canOpen) {
-      showAlert('Map unavailable', 'Unable to open map on this device.');
-      return;
-    }
-
-    await Linking.openURL(mapUrl);
-  };
-
-  const callSeller = async () => {
-    if (!seller?.phone) {
-      showAlert('Contact unavailable', 'Seller phone is not available yet.');
-      return;
-    }
-
-    const phoneUrl = `tel:${seller.phone}`;
-    const canOpen = await Linking.canOpenURL(phoneUrl);
-    if (!canOpen) {
-      showAlert('Call unavailable', 'Unable to start a call on this device.');
-      return;
-    }
-
-    await Linking.openURL(phoneUrl);
-  };
-
-  const whatsappSeller = async () => {
-    if (!seller?.phone) {
-      showAlert('Contact unavailable', 'Seller WhatsApp number is not available yet.');
-      return;
-    }
-
-    const digits = seller.phone.replace(/\D/g, '');
-    const intl = digits.length === 10 ? `91${digits}` : digits;
-    const message = encodeURIComponent(`Hi ${seller.businessName}, I want to know more about ${product?.name}.`);
-    const waUrl = `https://wa.me/${intl}?text=${message}`;
-
-    const canOpen = await Linking.canOpenURL(waUrl);
-    if (!canOpen) {
-      showAlert('WhatsApp unavailable', 'Unable to open WhatsApp on this device.');
-      return;
-    }
-
-    await Linking.openURL(waUrl);
-  };
-
-  const openSellerDirections = async () => {
-    if (!seller) return;
-
-    const hasCoordinates =
-      typeof seller.latitude === 'number' &&
-      typeof seller.longitude === 'number' &&
-      !Number.isNaN(seller.latitude) &&
-      !Number.isNaN(seller.longitude);
-
-    const destination = hasCoordinates
-      ? `${seller.latitude},${seller.longitude}`
-      : encodeURIComponent([seller.businessName, seller.address, seller.city, seller.district, seller.state].filter(Boolean).join(', '));
-
-    const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
-    const canOpen = await Linking.canOpenURL(directionsUrl);
-    if (!canOpen) {
-      showAlert('Map unavailable', 'Unable to open directions on this device.');
-      return;
-    }
-
-    await Linking.openURL(directionsUrl);
-  };
-
-  const requestProduct = () => {
-    handleAddToCart();
-  };
-
-  const reportListing = () => {
-    showAlert('Report Listing', 'To report an issue, place an order and use the order issue flow from My Orders.');
-  };
-
   if (!productId) {
     return (
       <View style={styles.errorContainer}>
@@ -467,18 +433,26 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
   }
 
   const normalizedImages = normalizeImageList((product as any).images);
-  const images = normalizedImages.length
+  const resolvedImages = normalizedImages.length
     ? normalizedImages
         .map((id) => resolveImageUrl(appwriteConfig.productImagesBucketId, id))
         .filter(Boolean)
-    : ['https://via.placeholder.com/400'];
+    : [];
+  const images: Array<string | null> = resolvedImages.length > 0 ? resolvedImages : [null];
 
   const isOutOfStock = product.stock !== undefined && product.stock < 1;
   const sellerTrustScore = seller ? calculateTrustScore(seller, { totalReviews: sellerReviewTotal }) : 0;
   const topArtisan = seller ? isTopArtisan(seller, { totalReviews: sellerReviewTotal }) : false;
   const isSellerVerified = !!seller?.verifiedBadge || seller?.verificationStatus === 'approved';
   const locationStateLabel = getStateName((product as any).state || product.region || seller?.state || '');
-  const sellerSecondaryAddress = getSellerSecondaryAddress(seller);
+  const productAddressLabel = getStandardProductAddress(product, seller, locationStateLabel);
+  const categoryTagLabel = toTitleCaseLabel(product.category) || 'Handmade';
+  const trustTagLabel = isSellerVerified
+    ? 'Verified seller'
+    : sellerTrustScore >= 80
+      ? 'Trusted seller'
+      : 'Buyer protection';
+  const sellerAddressLabel = getStandardProductAddress(product, seller, locationStateLabel);
 
   return (
     <View style={styles.container}>
@@ -501,17 +475,20 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
             renderItem={({ item, index }) => (
               <TouchableOpacity
                 activeOpacity={0.96}
+                disabled={!item}
                 onPress={() => {
+                  if (!item) return;
                   setViewerImageIndex(index);
                   resetViewerTransform();
                   setViewerVisible(true);
                 }}
               >
                 <View style={[styles.imageFrame, { width: galleryWidth, height: galleryHeight }]}>
-                  <Image
-                    source={{ uri: item }}
+                  <PremiumImage
+                    uri={item || undefined}
                     style={[styles.image, { width: galleryWidth, height: galleryHeight }]}
                     resizeMode="cover"
+                    variant="product"
                   />
                 </View>
               </TouchableOpacity>
@@ -581,13 +558,15 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
           </View>
 
           <View style={styles.tagRow}>
-            <View style={styles.tag}>
+            <View style={[styles.tag, styles.addressTag]}>
               <Ionicons name="location-outline" size={14} color={COLORS.primary} />
-              <Text style={styles.tagText}>{locationStateLabel || 'India'}</Text>
+              <Text style={[styles.tagText, styles.addressTagText]}>
+                {productAddressLabel || 'India'}
+              </Text>
             </View>
             <View style={styles.tag}>
               <Ionicons name="pricetag-outline" size={14} color={COLORS.primary} />
-              <Text style={styles.tagText}>{product.category}</Text>
+              <Text style={styles.tagText}>{categoryTagLabel}</Text>
             </View>
             {!!product.deliveryOption && (
               <View style={styles.tag}>
@@ -601,13 +580,14 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
                 </Text>
               </View>
             )}
-          </View>
-
-          <View style={styles.platformTrustStrip}>
-            <Ionicons name="shield-checkmark" size={16} color={COLORS.secondaryDark} />
-            <Text style={styles.platformTrustStripText}>
-              {'GramBazaar Protection:\n• Pay only after seller confirms\n• Track orders via courier\n• Report issues anytime'}
-            </Text>
+            <View style={[styles.tag, styles.trustTag]}>
+              <Ionicons
+                name={isSellerVerified ? 'shield-checkmark-outline' : 'shield-outline'}
+                size={14}
+                color={COLORS.secondaryDark}
+              />
+              <Text style={[styles.tagText, styles.trustTagText]}>{trustTagLabel}</Text>
+            </View>
           </View>
         </View>
 
@@ -633,30 +613,40 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
                 </View>
                 <View style={styles.sellerInfo}>
                   <View style={styles.sellerNameRow}>
-                    <Text style={styles.sellerName} numberOfLines={1}>
+                    <Text style={styles.sellerName}>
                       {seller.businessName}
                     </Text>
                     {isSellerVerified && (
                       <Ionicons name="checkmark-circle" size={16} color={COLORS.verified} />
                     )}
                   </View>
-                  <Text style={styles.sellerLocation}>
-                    {getStateName(seller.state)}
-                  </Text>
-                  {!!sellerSecondaryAddress && (
-                    <Text style={styles.sellerSubLocation}>{sellerSecondaryAddress}</Text>
-                  )}
-                  <View style={styles.sellerTrustRow}>
-                    <TrustBadge score={sellerTrustScore} size="small" />
-                    <Text style={styles.sellerTrustText}>
-                      {seller.verificationStatus === 'approved' ? 'Verified artisan' : 'Verification pending'}
-                    </Text>
+                  <View style={styles.sellerHeaderBadgeRow}>
+                    <View style={styles.sellerCraftChip}>
+                      <Ionicons name="hammer-outline" size={12} color={COLORS.primaryDark} />
+                      <Text style={styles.sellerCraftChipText}>{toTitleCaseLabel(seller.craftType) || 'Artisan'}</Text>
+                    </View>
                     {topArtisan && (
                       <View style={styles.topArtisanInlineChip}>
                         <Ionicons name="ribbon-outline" size={12} color="#92400E" />
                         <Text style={styles.topArtisanInlineText}>Top Artisan</Text>
                       </View>
                     )}
+                  </View>
+                  <View style={styles.sellerHeaderTagRow}>
+                    <View style={[styles.sellerHeaderTag, styles.sellerHeaderAddressTag]}>
+                      <Ionicons name="location-outline" size={12} color={COLORS.primary} />
+                      <Text style={[styles.sellerHeaderTagText, styles.sellerHeaderAddressText]}>
+                        {sellerAddressLabel}
+                      </Text>
+                    </View>
+                    <View style={[styles.sellerHeaderTag, styles.sellerHeaderTrustTag]}>
+                      <Ionicons
+                        name={isSellerVerified ? 'shield-checkmark-outline' : 'shield-outline'}
+                        size={12}
+                        color={COLORS.secondaryDark}
+                      />
+                      <Text style={[styles.sellerHeaderTagText, styles.sellerHeaderTrustText]}>{trustTagLabel}</Text>
+                    </View>
                   </View>
                 </View>
               </View>
@@ -665,8 +655,8 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
 
             <View style={styles.sellerMetaPills}>
               <View style={styles.sellerMetaPill}>
-                <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.secondaryDark} />
-                <Text style={styles.sellerMetaText}>Trust {sellerTrustScore}</Text>
+                <Ionicons name="receipt-outline" size={13} color={COLORS.primaryDark} />
+                <Text style={styles.sellerMetaText}>Orders {Math.max(0, seller.totalOrders || 0)}</Text>
               </View>
               <View style={styles.sellerMetaPill}>
                 <Ionicons name="star-outline" size={13} color={COLORS.warning} />
@@ -677,13 +667,13 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
               <View style={styles.sellerMetaPill}>
                 <Ionicons name="location-outline" size={13} color={COLORS.primary} />
                 <Text style={styles.sellerMetaText}>
-                  {sellerDistanceKm !== null ? `${sellerDistanceKm} km away` : 'Verified location'}
+                  {sellerDistanceKm !== null ? `${sellerDistanceKm} km` : 'Verified location'}
                 </Text>
               </View>
             </View>
 
             <Text style={styles.sellerHintText}>
-              Full trust breakdown, location details, and seller history are available on the seller profile.
+              View full seller profile for complete store details and support policies.
             </Text>
 
             <View style={styles.sellerHighlights}>
@@ -715,33 +705,9 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
                 <Ionicons name="person-circle-outline" size={16} color="#FFF" />
                 <Text style={styles.sellerPrimaryActionText}>View Seller Profile</Text>
               </TouchableOpacity>
-
-              <View style={styles.sellerSecondaryActions}>
-                <TouchableOpacity style={styles.sellerGhostAction} onPress={openSellerMap}>
-                  <Ionicons name="map-outline" size={15} color={COLORS.primary} />
-                  <Text style={styles.sellerGhostActionText}>Map</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.sellerGhostAction} onPress={openSellerDirections}>
-                  <Ionicons name="navigate-outline" size={15} color={COLORS.primary} />
-                  <Text style={styles.sellerGhostActionText}>Directions</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.sellerGhostAction} onPress={callSeller}>
-                  <Ionicons name="call-outline" size={15} color={COLORS.primary} />
-                  <Text style={styles.sellerGhostActionText}>Call</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.sellerGhostAction} onPress={whatsappSeller}>
-                  <Ionicons name="logo-whatsapp" size={15} color={COLORS.primary} />
-                  <Text style={styles.sellerGhostActionText}>WhatsApp</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.sellerGhostAction} onPress={requestProduct}>
-                  <Ionicons name="bag-add-outline" size={15} color={COLORS.primary} />
-                  <Text style={styles.sellerGhostActionText}>Request</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.sellerGhostAction} onPress={reportListing}>
-                  <Ionicons name="flag-outline" size={15} color={COLORS.primary} />
-                  <Text style={styles.sellerGhostActionText}>Report</Text>
-                </TouchableOpacity>
-              </View>
+              <Text style={styles.sellerActionHint}>
+                Map, directions, call, and WhatsApp are available inside the seller profile.
+              </Text>
             </View>
           </View>
         )}
@@ -835,8 +801,8 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
                   shouldCancelWhenOutside={false}
                 >
                   <View style={styles.viewerImageCard} collapsable={false}>
-                    <Image
-                      source={{ uri: images[viewerImageIndex] }}
+                    <PremiumImage
+                      uri={images[viewerImageIndex] || undefined}
                       style={[
                         styles.viewerImage,
                         {
@@ -848,6 +814,7 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
                         },
                       ]}
                       resizeMode="contain"
+                      variant="product"
                     />
                   </View>
                 </PanGestureHandler>
@@ -1030,26 +997,25 @@ const styles = StyleSheet.create({
   outOfStockBadge: { backgroundColor: `${COLORS.error}15`, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
   outOfStockText: { fontSize: 12, fontWeight: '600', color: COLORS.error },
   lowStock: { fontSize: 13, fontWeight: '600', color: COLORS.warning },
-  tagRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
+  tagRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' },
   tag: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${COLORS.primary}10`, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16 },
-  tagText: { fontSize: 12, color: COLORS.primary, fontWeight: '600' },
-  platformTrustStrip: {
-    marginTop: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: `${COLORS.secondary}30`,
-    backgroundColor: `${COLORS.secondary}10`,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    flexDirection: 'row',
-    gap: 8,
+  addressTag: {
+    width: '100%',
+    borderRadius: 12,
     alignItems: 'flex-start',
+    paddingVertical: 7,
   },
-  platformTrustStripText: {
+  tagText: { fontSize: 12, color: COLORS.primary, fontWeight: '600' },
+  addressTagText: {
     flex: 1,
-    fontSize: 12,
-    fontWeight: '600',
-    lineHeight: 18,
+    flexShrink: 1,
+    lineHeight: 17,
+    color: COLORS.primaryDark,
+  },
+  trustTag: {
+    backgroundColor: `${COLORS.secondary}10`,
+  },
+  trustTagText: {
     color: COLORS.secondaryDark,
   },
   section: {
@@ -1067,32 +1033,98 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle: { fontSize: 17, fontWeight: 'bold', color: COLORS.text, marginBottom: 8 },
-  seeAll: { fontSize: 14, fontWeight: '600', color: COLORS.primary },
-  description: { fontSize: 15, color: COLORS.textSecondary, lineHeight: 22 },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginBottom: 10 },
+  seeAll: { fontSize: 14, fontWeight: '700', color: COLORS.primary },
+  description: { fontSize: 14, color: COLORS.textSecondary, lineHeight: 21 },
   sellerCard: {
-    padding: 16, backgroundColor: COLORS.surface,
-    marginTop: 10, marginHorizontal: 12, borderRadius: 16, borderWidth: 1, borderColor: COLORS.border,
+    padding: 16, backgroundColor: '#FFFCF7',
+    marginTop: 10, marginHorizontal: 12, borderRadius: 16, borderWidth: 1, borderColor: `${COLORS.primary}25`,
     shadowColor: '#000',
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
   },
   sellerCardHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
-  sellerLeft: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  sellerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center' },
+  sellerLeft: { flex: 1, flexDirection: 'row', alignItems: 'flex-start' },
+  sellerAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}50`,
+  },
   sellerAvatarText: { fontSize: 18, fontWeight: 'bold', color: '#FFF' },
   sellerInfo: { marginLeft: 12, flex: 1 },
-  sellerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  sellerName: { fontSize: 15, fontWeight: '600', color: COLORS.text },
-  sellerLocation: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
-  sellerSubLocation: { fontSize: 12, color: COLORS.textTertiary, marginTop: 1 },
-  sellerTrustRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' },
-  sellerTrustText: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '600' },
+  sellerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: 6 },
+  sellerName: { fontSize: 17, fontWeight: '800', color: COLORS.text, flexShrink: 1, lineHeight: 22 },
+  sellerHeaderBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  sellerCraftChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}38`,
+    backgroundColor: `${COLORS.primary}12`,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  sellerCraftChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+  },
+  sellerHeaderTagRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
+  },
+  sellerHeaderTag: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}30`,
+    backgroundColor: `${COLORS.primary}10`,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  sellerHeaderTagText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  sellerHeaderAddressTag: {
+    width: '100%',
+  },
+  sellerHeaderAddressText: {
+    flex: 1,
+    lineHeight: 17,
+    color: COLORS.primaryDark,
+  },
+  sellerHeaderTrustTag: {
+    borderColor: `${COLORS.secondary}35`,
+    backgroundColor: `${COLORS.secondary}10`,
+  },
+  sellerHeaderTrustText: {
+    color: COLORS.secondaryDark,
+  },
   topArtisanInlineChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1114,22 +1146,30 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
     marginTop: 12,
+    alignItems: 'stretch',
   },
   sellerMetaPill: {
+    flex: 1,
+    minWidth: '31%',
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 5,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.background,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    minHeight: 36,
   },
   sellerMetaText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: COLORS.textSecondary,
+    flexShrink: 1,
+    textAlign: 'center',
+    lineHeight: 15,
   },
   sellerHintText: {
     marginTop: 10,
@@ -1169,32 +1209,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
-  sellerSecondaryActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  sellerGhostAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: `${COLORS.primary}0A`,
-    minWidth: 96,
-  },
-  sellerGhostActionText: {
+  sellerActionHint: {
     fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.primary,
+    color: COLORS.textSecondary,
+    lineHeight: 17,
+    textAlign: 'center',
   },
-  noReviews: { fontSize: 14, color: COLORS.textTertiary, fontStyle: 'italic' },
-  reviewCard: { padding: 12, backgroundColor: COLORS.background, borderRadius: 8, marginBottom: 8 },
+  noReviews: { fontSize: 13, color: COLORS.textTertiary, fontStyle: 'italic' },
+  reviewCard: {
+    padding: 12,
+    backgroundColor: COLORS.card,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 8,
+  },
   reviewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  reviewDate: { fontSize: 12, color: COLORS.textTertiary },
+  reviewDate: { fontSize: 11, color: COLORS.textTertiary },
   reviewContextChip: {
     alignSelf: 'flex-start',
     marginBottom: 6,
@@ -1210,7 +1241,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.info,
   },
-  reviewComment: { fontSize: 14, color: COLORS.textSecondary, lineHeight: 20 },
+  reviewComment: { fontSize: 13, color: COLORS.textSecondary, lineHeight: 19 },
   viewerGestureRoot: {
     flex: 1,
     backgroundColor: 'transparent',

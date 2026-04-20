@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, FlatList, Image } from 'react-native';
+import { View, StyleSheet, FlatList } from 'react-native';
 import { Text, Card, Searchbar, useTheme, Chip, Button } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { spacing } from '../../src/config/theme';
@@ -7,6 +7,7 @@ import { Product } from '../../src/types';
 import { productService } from '../../src/services/productService';
 import { useCartStore } from '../../src/stores/cartStore';
 import { showAlert } from '../../src/utils/alert';
+import { PremiumImage } from '../../src/components/PremiumImage';
 
 export default function BrowseScreen() {
   const theme = useTheme();
@@ -43,9 +44,10 @@ export default function BrowseScreen() {
 
   const renderProduct = ({ item }: { item: Product }) => (
     <Card style={styles.productCard}>
-      <Card.Cover 
-        source={{ uri: item.images[0] || 'https://picsum.photos/400/300' }}
+      <PremiumImage
+        uri={item.images?.[0]}
         style={styles.productImage}
+        variant="product"
       />
       <Card.Content>
         <Text variant="titleMedium" numberOfLines={2}>{item.name}</Text>

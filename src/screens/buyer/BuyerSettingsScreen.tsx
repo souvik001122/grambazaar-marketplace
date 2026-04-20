@@ -10,18 +10,28 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
 import { showAlert } from '../../utils/alert';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
-const BuyerSettingsScreen = () => {
+const BuyerSettingsScreen = ({ navigation }: any) => {
   const [orderUpdates, setOrderUpdates] = useState(true);
   const [offerAlerts, setOfferAlerts] = useState(true);
   const [locationDiscovery, setLocationDiscovery] = useState(true);
   const enabledCount = [orderUpdates, offerAlerts, locationDiscovery].filter(Boolean).length;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.container}>
+      <PremiumTopBar
+        title="Settings"
+        subtitle="Control notifications, discovery, and privacy"
+        icon="settings-outline"
+        showBack={navigation?.canGoBack?.()}
+        onBack={() => navigation?.goBack?.()}
+      />
+
+      <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.heroCard}>
-        <Text style={styles.heroTitle}>Settings</Text>
-        <Text style={styles.heroSubtitle}>Control notifications, discovery, and privacy</Text>
+        <Text style={styles.heroTitle}>Preferences Overview</Text>
+        <Text style={styles.heroSubtitle}>Tune how GramBazaar alerts and discovery work for you</Text>
         <View style={styles.heroPill}>
           <Text style={styles.heroPillText}>{enabledCount} of 3 options enabled</Text>
         </View>
@@ -77,7 +87,8 @@ const BuyerSettingsScreen = () => {
           <Ionicons name="chevron-forward" size={18} color={COLORS.textTertiary} />
         </TouchableOpacity>
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 };
 

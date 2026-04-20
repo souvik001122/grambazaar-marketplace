@@ -74,3 +74,10 @@ npm start
 - Use `develop` for daily work.
 - Merge to `main` only after stability checks.
 - Keep changes documented in matching lab and commit format.
+- Follow the full contribution standard in `CONTRIBUTING.md`.
+
+## Project Team
+- Shubham Kumar (231210099)
+- Souvik Das (231210104)
+- Vivek Bhardwaj (231210125)
+- Yuvraj Pegu (231210129)

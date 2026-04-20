@@ -18,8 +18,9 @@ import { COLORS } from '../../constants/colors';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { isCompletedSale } from '../../utils/salesMetrics';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
-const SellerAnalyticsScreen = () => {
+const SellerAnalyticsScreen = ({ navigation }: any) => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -155,8 +156,19 @@ const SellerAnalyticsScreen = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
+    <PremiumTopBar
+      title="Analytics"
+      subtitle="Sales, performance, and product insights"
+      icon="analytics-outline"
+      showBack={navigation?.canGoBack?.()}
+      onBack={() => navigation?.goBack?.()}
+      rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+      onRightPress={onRefresh}
+      rightDisabled={refreshing}
+    />
+
     <ScrollView
-      style={styles.container}
+      style={{ flex: 1 }}
       contentContainerStyle={{ paddingBottom: 16 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
@@ -321,55 +333,72 @@ const SellerAnalyticsScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: COLORS.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   section: { padding: 16, paddingBottom: 0 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', color: '#333', marginBottom: 12 },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: COLORS.text, marginBottom: 12 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   statCard: {
-    flex: 1, minWidth: '45%', backgroundColor: '#fff', padding: 16, borderRadius: 12,
-    alignItems: 'center', borderLeftWidth: 4,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06,
-    shadowRadius: 2, elevation: 2,
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: COLORS.surface,
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    borderLeftWidth: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
   },
-  statValue: { fontSize: 22, fontWeight: '700', color: '#333', marginTop: 6 },
-  statLabel: { fontSize: 11, color: '#999', marginTop: 2 },
+  statValue: { fontSize: 21, fontWeight: '800', color: COLORS.text, marginTop: 6 },
+  statLabel: { fontSize: 11, color: COLORS.textSecondary, marginTop: 2, fontWeight: '600' },
   card: {
-    backgroundColor: '#fff', borderRadius: 12, padding: 16,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06,
-    shadowRadius: 2, elevation: 2,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
   },
   statusRow: { flexDirection: 'row', justifyContent: 'space-around' },
   statusItem: { alignItems: 'center' },
   statusDot: { width: 10, height: 10, borderRadius: 5, marginBottom: 6 },
-  statusLabel: { fontSize: 12, color: '#666' },
-  statusValue: { fontSize: 20, fontWeight: '700', color: '#333', marginTop: 4 },
+  statusLabel: { fontSize: 12, color: COLORS.textSecondary },
+  statusValue: { fontSize: 19, fontWeight: '800', color: COLORS.text, marginTop: 4 },
   barChart: { marginTop: 16 },
   barChartRow: { flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden' },
   barSegment: { height: '100%' },
   ratingRow: { flexDirection: 'row', alignItems: 'center' },
   ratingBig: { alignItems: 'center', marginRight: 24 },
-  ratingValue: { fontSize: 36, fontWeight: '700', color: '#333' },
+  ratingValue: { fontSize: 34, fontWeight: '800', color: COLORS.text },
   starsRow: { flexDirection: 'row', gap: 2, marginTop: 4 },
   ratingInfo: { flex: 1 },
-  ratingInfoText: { fontSize: 14, fontWeight: '600', color: '#333' },
-  ratingInfoSubtext: { fontSize: 13, color: '#666', marginTop: 4 },
-  categoryRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
+  ratingInfoText: { fontSize: 13, fontWeight: '700', color: COLORS.text },
+  ratingInfoSubtext: { fontSize: 12, color: COLORS.textSecondary, marginTop: 4 },
+  categoryRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   categoryDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
-  categoryName: { flex: 1, fontSize: 14, color: '#333' },
-  categoryCount: { fontSize: 13, color: '#999' },
+  categoryName: { flex: 1, fontSize: 13, color: COLORS.text, fontWeight: '600' },
+  categoryCount: { fontSize: 12, color: COLORS.textSecondary },
   topProductRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: '#f5f5f5',
+    borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
   topProductRank: { fontSize: 16, fontWeight: '700', color: COLORS.primary, width: 32 },
   topProductInfo: { flex: 1 },
-  topProductName: { fontSize: 14, fontWeight: '500', color: '#333' },
+  topProductName: { fontSize: 13, fontWeight: '700', color: COLORS.text },
   topProductMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  topProductMetaText: { fontSize: 12, color: '#999', marginRight: 8 },
-  regionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f5f5f5', gap: 8 },
-  regionName: { flex: 1, fontSize: 14, color: '#333' },
-  regionCount: { fontSize: 13, color: '#999' },
+  topProductMetaText: { fontSize: 12, color: COLORS.textSecondary, marginRight: 8 },
+  regionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: COLORS.border, gap: 8 },
+  regionName: { flex: 1, fontSize: 13, color: COLORS.text, fontWeight: '600' },
+  regionCount: { fontSize: 12, color: COLORS.textSecondary },
 });
 
 export default SellerAnalyticsScreen;

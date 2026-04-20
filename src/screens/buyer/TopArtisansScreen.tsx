@@ -13,7 +13,8 @@ import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { Seller } from '../../types/seller.types';
 import { COLORS } from '../../constants/colors';
 import { getSellersByRegion, getTopVerifiedSellers } from '../../services/sellerService';
-import { calculateTrustScore, isTopArtisan } from '../../utils/trustScore';
+import { rankSellersForTopArtisans } from '../../utils/homeRanking';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 const TopArtisansScreen = ({ navigation, route }: any) => {
   const regionParam = route?.params?.region;
@@ -37,14 +38,7 @@ const TopArtisansScreen = ({ navigation, route }: any) => {
     try {
       setLoading(true);
       const rawSellers = regionFilter ? await getSellersByRegion(regionFilter) : await getTopVerifiedSellers(300);
-      const ranked = [...rawSellers].sort((a, b) => {
-        const aTop = isTopArtisan(a) ? 1 : 0;
-        const bTop = isTopArtisan(b) ? 1 : 0;
-        if (bTop !== aTop) {
-          return bTop - aTop;
-        }
-        return calculateTrustScore(b) - calculateTrustScore(a);
-      });
+      const ranked = rankSellersForTopArtisans(rawSellers);
       setSellers(ranked);
     } catch (error) {
       console.error('Error loading top artisans list:', error);
@@ -70,6 +64,17 @@ const TopArtisansScreen = ({ navigation, route }: any) => {
 
   return (
     <View style={styles.container}>
+      <PremiumTopBar
+        title="Top Artisans"
+        subtitle={subtitle}
+        icon="ribbon-outline"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={handleRefresh}
+        rightDisabled={refreshing}
+      />
+
       <FlatList
         data={sellers}
         keyExtractor={(item) => item.$id}
@@ -79,11 +84,22 @@ const TopArtisansScreen = ({ navigation, route }: any) => {
         ListHeaderComponent={
           <View style={styles.headerCard}>
             <View style={styles.headerTitleRow}>
-              <Ionicons name="ribbon-outline" size={16} color={COLORS.primaryDark} />
-              <Text style={styles.headerTitle}>Top Artisans</Text>
+              <View style={styles.headerIconBadge}>
+                <Ionicons name="ribbon-outline" size={14} color="#92400E" />
+              </View>
+              <Text style={styles.headerTitle}>Curated Seller Ranking</Text>
             </View>
-            <Text style={styles.headerSubtitle}>{subtitle}</Text>
-            <Text style={styles.headerCount}>{sellers.length} artisan{sellers.length === 1 ? '' : 's'} found</Text>
+            <Text style={styles.headerSubtitle}>Ranking updates as trust, reviews, and verified performance change.</Text>
+            <View style={styles.headerMetaRow}>
+              <View style={styles.headerMetaPill}>
+                <Ionicons name="location-outline" size={12} color={COLORS.primary} />
+                <Text style={styles.headerMetaPillText}>{regionLabel}</Text>
+              </View>
+              <View style={styles.headerMetaPill}>
+                <Ionicons name="people-outline" size={12} color={COLORS.primary} />
+                <Text style={styles.headerMetaPillText}>{sellers.length} artisan{sellers.length === 1 ? '' : 's'}</Text>
+              </View>
+            </View>
           </View>
         }
         renderItem={({ item }) => (
@@ -124,32 +140,64 @@ const styles = StyleSheet.create({
   },
   headerCard: {
     borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: `${COLORS.primary}28`,
-    backgroundColor: `${COLORS.primary}10`,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}25`,
+    backgroundColor: '#FFFCF7',
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
     marginBottom: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
   },
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+  },
+  headerIconBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B55',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
     color: COLORS.text,
   },
   headerSubtitle: {
-    marginTop: 4,
+    marginTop: 8,
     fontSize: 12,
     fontWeight: '600',
     color: COLORS.textSecondary,
+    lineHeight: 18,
   },
-  headerCount: {
-    marginTop: 4,
-    fontSize: 12,
+  headerMetaRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  headerMetaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}35`,
+    backgroundColor: `${COLORS.primary}10`,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  headerMetaPillText: {
+    fontSize: 11,
     fontWeight: '700',
     color: COLORS.primaryDark,
   },

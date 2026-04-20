@@ -18,6 +18,7 @@ import { Product } from '../../types/product.types';
 import { SavedProduct } from '../../types/common.types';
 import { ProductCard } from '../../components/ProductCard';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 import { showAlert } from '../../utils/alert';
 import { BUYER_LAYOUT } from '../../constants/layout';
 
@@ -166,13 +167,13 @@ const WishlistScreen = ({ navigation }: any) => {
   if (!user) {
     return (
       <View style={styles.container}>
-        <View style={styles.screenHeader}>
-          <View style={styles.screenHeaderRow}>
-            <Ionicons name="heart" size={22} color="#FFF" />
-            <Text style={styles.screenHeaderTitle}>My Wishlist</Text>
-          </View>
-          <Text style={styles.screenHeaderSubtitle}>Login to save and manage your picks</Text>
-        </View>
+        <PremiumTopBar
+          title="My Wishlist"
+          subtitle="Login to save and manage your picks"
+          icon="heart"
+          showBack={navigation.canGoBack()}
+          onBack={() => navigation.goBack()}
+        />
 
         <View style={[styles.guestWrap, railStyle]}>
           <Ionicons name="lock-closed-outline" size={64} color={COLORS.textTertiary} />
@@ -217,14 +218,13 @@ const WishlistScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.screenHeader}>
-        <View style={styles.screenHeaderRow}>
-          <Ionicons name="heart" size={22} color="#FFF" />
-          <Text style={styles.screenHeaderTitle}>My Wishlist</Text>
-        </View>
-        <Text style={styles.screenHeaderSubtitle}>Products you saved for later</Text>
-      </View>
+      <PremiumTopBar
+        title="My Wishlist"
+        subtitle="Products you saved for later"
+        icon="heart"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+      />
       <FlatList
         data={products}
         keyExtractor={(item) => item.$id}

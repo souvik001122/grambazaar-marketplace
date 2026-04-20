@@ -32,6 +32,7 @@ import {
   searchRealLocalitiesByDistrictQuery,
   type RealLocalityOption,
 } from '../../services/locationDataService';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 type NearbySeller = {
   seller: Seller;
@@ -44,6 +45,7 @@ type NearbySeller = {
 const LOCALITY_PIN_LENGTH = 6;
 const LOCALITY_MIN_TEXT_QUERY = 3;
 const LOCALITY_RESULT_LIMIT = 220;
+const EXPLORE_PAGE_SIZE = 12;
 
 const toRadians = (value: number) => (value * Math.PI) / 180;
 
@@ -606,7 +608,7 @@ const RegionExploreScreen = ({ navigation, route }: any) => {
             sortBy: 'trust_high',
           },
           1,
-          20
+          EXPLORE_PAGE_SIZE
         );
 
         setProducts(response.data);
@@ -640,7 +642,7 @@ const RegionExploreScreen = ({ navigation, route }: any) => {
           sortBy: 'trust_high',
         },
         1,
-        20
+        EXPLORE_PAGE_SIZE
       );
 
       setProducts(response.data);
@@ -673,7 +675,7 @@ const RegionExploreScreen = ({ navigation, route }: any) => {
           sortBy: 'trust_high',
         },
         nextPage,
-        20
+        EXPLORE_PAGE_SIZE
       );
 
       setProducts((prev) => {
@@ -829,8 +831,8 @@ const RegionExploreScreen = ({ navigation, route }: any) => {
   };
 
   const renderProductCardInline = useCallback(
-    (item: Product) => (
-      <View key={item.$id} style={styles.productsGridItem}>
+    ({ item }: { item: Product }) => (
+      <View style={styles.productsGridItem}>
         <ProductCard
           product={item}
           fullWidth
@@ -1207,7 +1209,20 @@ const RegionExploreScreen = ({ navigation, route }: any) => {
               </View>
             ) : products.length > 0 ? (
               <>
-                <View style={styles.productsGridWrap}>{products.map(renderProductCardInline)}</View>
+                <FlatList
+                  data={products}
+                  keyExtractor={(item) => item.$id}
+                  numColumns={2}
+                  scrollEnabled={false}
+                  removeClippedSubviews={Platform.OS === 'android'}
+                  initialNumToRender={6}
+                  maxToRenderPerBatch={6}
+                  windowSize={5}
+                  updateCellsBatchingPeriod={90}
+                  contentContainerStyle={styles.productsGridList}
+                  columnWrapperStyle={styles.productsGridRow}
+                  renderItem={renderProductCardInline}
+                />
                 {loadingMore ? (
                   <View style={styles.loadMoreFooter}>
                     <ActivityIndicator size="small" color={COLORS.primary} />
@@ -1232,10 +1247,13 @@ const RegionExploreScreen = ({ navigation, route }: any) => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Ionicons name="compass-outline" size={22} color="#FFF" />
-        <Text style={styles.headerTitle}>Explore by Region</Text>
-      </View>
+      <PremiumTopBar
+        title="Explore by Region"
+        subtitle="Use state, district, locality, and landmarks"
+        icon="compass-outline"
+        rightLabel="Reset"
+        onRightPress={clearAll}
+      />
 
       {pickerMode !== null ? (
         <View style={styles.pickerOverlayRoot}>
@@ -1935,10 +1953,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 18,
   },
-  productsGridWrap: {
+  productsGridList: {
     marginTop: 10,
+  },
+  productsGridRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'space-between',
   },
   productsGridItem: {

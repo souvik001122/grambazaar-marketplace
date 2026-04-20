@@ -8,6 +8,7 @@ import { COLORS } from '../constants/colors';
 import { useAuth } from '../context/AuthContext';
 import { getUnreadCount } from '../services/notificationService';
 import { getWishlistCount, subscribeWishlistChanges } from '../services/wishlistService';
+import { PREMIUM_STACK_OPTIONS } from './premiumStackOptions';
 
 // Buyer Screens
 import HomeScreen from '../screens/buyer/HomeScreen';
@@ -48,22 +49,18 @@ const isNestedDetailScreen = (route: any): boolean => {
 
 // ─── Shared stack screen options ────────────────────────────────
 
-const stackScreenOptions = {
-  headerStyle: { backgroundColor: COLORS.primary },
-  headerTintColor: '#FFF',
-  headerTitleStyle: { fontWeight: '700' as const },
-};
+const stackScreenOptions = PREMIUM_STACK_OPTIONS;
 
 // ─── Stack navigators for each tab ──────────────────────────────
 
 const HomeStack = () => (
   <Stack.Navigator screenOptions={stackScreenOptions}>
     <Stack.Screen name="HomeMain" component={HomeScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="TopArtisans" component={TopArtisansScreen} options={{ title: 'Top Artisans' }} />
+    <Stack.Screen name="TopArtisans" component={TopArtisansScreen} options={{ headerShown: false }} />
     <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
     <Stack.Screen name="Cart" component={CartScreen} options={{ title: 'My Cart' }} />
     <Stack.Screen name="Checkout" component={CheckoutScreen} options={{ title: 'Checkout' }} />
-    <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ title: 'Seller' }} />
+    <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
     <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={{ title: 'Write Review' }} />
     <Stack.Screen name="ProductReviews" component={ProductReviewsScreen} options={{ title: 'Reviews' }} />
   </Stack.Navigator>
@@ -75,7 +72,7 @@ const SearchStack = () => (
     <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
     <Stack.Screen name="Cart" component={CartScreen} options={{ title: 'My Cart' }} />
     <Stack.Screen name="Checkout" component={CheckoutScreen} options={{ title: 'Checkout' }} />
-    <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ title: 'Seller' }} />
+    <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
     <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={{ title: 'Write Review' }} />
     <Stack.Screen name="ProductReviews" component={ProductReviewsScreen} options={{ title: 'Reviews' }} />
   </Stack.Navigator>
@@ -84,8 +81,8 @@ const SearchStack = () => (
 const OrdersStack = () => (
   <Stack.Navigator screenOptions={stackScreenOptions}>
     <Stack.Screen name="OrdersMain" component={BuyerOrdersScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="OrderDetail" component={BuyerOrderDetailScreen} options={{ title: 'Order Detail' }} />
-    <Stack.Screen name="RaiseOrderIssue" component={RaiseOrderIssueScreen} options={{ title: 'Raise Issue' }} />
+    <Stack.Screen name="OrderDetail" component={BuyerOrderDetailScreen} options={{ headerShown: false }} />
+    <Stack.Screen name="RaiseOrderIssue" component={RaiseOrderIssueScreen} options={{ headerShown: false }} />
     <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
     <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={{ title: 'Write Review' }} />
   </Stack.Navigator>
@@ -95,7 +92,7 @@ const ExploreStack = () => (
   <Stack.Navigator screenOptions={stackScreenOptions}>
     <Stack.Screen name="ExploreMain" component={RegionExploreScreen} options={{ headerShown: false }} />
     <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ title: 'Seller' }} />
+    <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
     <Stack.Screen name="Cart" component={CartScreen} options={{ title: 'My Cart' }} />
     <Stack.Screen name="Checkout" component={CheckoutScreen} options={{ title: 'Checkout' }} />
   </Stack.Navigator>
@@ -105,20 +102,20 @@ const WishlistStack = () => (
   <Stack.Navigator screenOptions={stackScreenOptions}>
     <Stack.Screen name="WishlistMain" component={WishlistScreen} options={{ headerShown: false }} />
     <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ title: 'Seller' }} />
+    <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
   </Stack.Navigator>
 );
 
 const ProfileStack = () => (
   <Stack.Navigator screenOptions={stackScreenOptions}>
     <Stack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
-    <Stack.Screen name="Orders" component={BuyerOrdersScreen} options={{ title: 'My Orders' }} />
-    <Stack.Screen name="OrderDetail" component={BuyerOrderDetailScreen} options={{ title: 'Order Detail' }} />
-    <Stack.Screen name="RaiseOrderIssue" component={RaiseOrderIssueScreen} options={{ title: 'Raise Issue' }} />
-    <Stack.Screen name="Wishlist" component={WishlistScreen} options={{ title: 'My Wishlist' }} />
-    <Stack.Screen name="BuyerNotifications" component={BuyerNotificationsScreen} options={{ title: 'Notifications' }} />
-    <Stack.Screen name="BuyerMyReviews" component={BuyerMyReviewsScreen} options={{ title: 'My Reviews' }} />
-    <Stack.Screen name="BuyerSettings" component={BuyerSettingsScreen} options={{ title: 'Settings' }} />
+    <Stack.Screen name="Orders" component={BuyerOrdersScreen} options={{ headerShown: false }} />
+    <Stack.Screen name="OrderDetail" component={BuyerOrderDetailScreen} options={{ headerShown: false }} />
+    <Stack.Screen name="RaiseOrderIssue" component={RaiseOrderIssueScreen} options={{ headerShown: false }} />
+    <Stack.Screen name="Wishlist" component={WishlistScreen} options={{ headerShown: false }} />
+    <Stack.Screen name="BuyerNotifications" component={BuyerNotificationsScreen} options={{ headerShown: false }} />
+    <Stack.Screen name="BuyerMyReviews" component={BuyerMyReviewsScreen} options={{ headerShown: false }} />
+    <Stack.Screen name="BuyerSettings" component={BuyerSettingsScreen} options={{ headerShown: false }} />
     <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
     <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={{ title: 'Write Review' }} />
   </Stack.Navigator>
