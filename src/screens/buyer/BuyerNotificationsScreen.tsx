@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
@@ -57,7 +58,7 @@ const BuyerNotificationsScreen = ({ navigation }: any) => {
     loadNotifications();
   };
 
-  const handleMarkRead = async (item: Notification) => {
+  const handleMarkRead = useCallback(async (item: Notification) => {
     if (item.isRead) return;
 
     try {
@@ -68,9 +69,9 @@ const BuyerNotificationsScreen = ({ navigation }: any) => {
     } catch {
       // ignore to keep screen responsive
     }
-  };
+  }, []);
 
-  const navigateFromNotification = (item: Notification) => {
+  const navigateFromNotification = useCallback((item: Notification) => {
     const relatedId = item.relatedEntityId || '';
 
     if (!relatedId) return;
@@ -88,7 +89,7 @@ const BuyerNotificationsScreen = ({ navigation }: any) => {
     if (item.type === 'verification') {
       navigation.navigate('SellerProfile', { sellerId: relatedId });
     }
-  };
+  }, [navigation]);
 
   const handleMarkAllRead = async () => {
     if (!user) return;
@@ -104,6 +105,57 @@ const BuyerNotificationsScreen = ({ navigation }: any) => {
     }
   };
 
+  const unreadCount = useMemo(
+    () => notifications.filter((item) => !item.isRead).length,
+    [notifications]
+  );
+
+  const handleNotificationPress = useCallback((item: Notification) => {
+    handleMarkRead(item);
+    navigateFromNotification(item);
+  }, [handleMarkRead, navigateFromNotification]);
+
+  const renderNotification = useCallback(
+    ({ item }: { item: Notification }) => (
+      <TouchableOpacity
+        style={[styles.card, !item.isRead && styles.cardUnread]}
+        onPress={() => handleNotificationPress(item)}
+        activeOpacity={0.85}
+      >
+        <View style={styles.cardTop}>
+          <Text style={styles.cardTitle}>{item.title || 'Update'}</Text>
+          {!item.isRead && <View style={styles.unreadDot} />}
+        </View>
+        <Text style={styles.cardMessage}>{item.message}</Text>
+        <Text style={styles.cardTime}>{formatRelativeTime(item.createdAt)}</Text>
+      </TouchableOpacity>
+    ),
+    [handleNotificationPress]
+  );
+
+  const summaryHeader = useMemo(
+    () =>
+      notifications.length > 0 ? (
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryValue}>{notifications.length}</Text>
+            <Text style={styles.summaryLabel}>Total</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryValue}>{unreadCount}</Text>
+            <Text style={styles.summaryLabel}>Unread</Text>
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryValue}>{notifications.length - unreadCount}</Text>
+            <Text style={styles.summaryLabel}>Read</Text>
+          </View>
+        </View>
+      ) : null,
+    [notifications.length, unreadCount]
+  );
+
   if (loading) {
     return (
       <View style={styles.loaderWrap}>
@@ -111,8 +163,6 @@ const BuyerNotificationsScreen = ({ navigation }: any) => {
       </View>
     );
   }
-
-  const unreadCount = notifications.filter((item) => !item.isRead).length;
 
   return (
     <View style={styles.container}>
@@ -136,51 +186,21 @@ const BuyerNotificationsScreen = ({ navigation }: any) => {
       <FlatList
         data={notifications}
         keyExtractor={(item) => item.$id}
+        renderItem={renderNotification}
+        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        updateCellsBatchingPeriod={80}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />}
         contentContainerStyle={[styles.listContent, railStyle, { paddingBottom: tabBarHeight }]}
-        ListHeaderComponent={
-          notifications.length > 0 ? (
-            <View style={styles.summaryCard}>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryValue}>{notifications.length}</Text>
-                <Text style={styles.summaryLabel}>Total</Text>
-              </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryValue}>{unreadCount}</Text>
-                <Text style={styles.summaryLabel}>Unread</Text>
-              </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryValue}>{notifications.length - unreadCount}</Text>
-                <Text style={styles.summaryLabel}>Read</Text>
-              </View>
-            </View>
-          ) : null
-        }
+        ListHeaderComponent={summaryHeader}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
             <Ionicons name="notifications-off-outline" size={42} color={COLORS.textTertiary} />
             <Text style={styles.emptyText}>No notifications yet</Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.card, !item.isRead && styles.cardUnread]}
-            onPress={() => {
-              handleMarkRead(item);
-              navigateFromNotification(item);
-            }}
-            activeOpacity={0.85}
-          >
-            <View style={styles.cardTop}>
-              <Text style={styles.cardTitle}>{item.title || 'Update'}</Text>
-              {!item.isRead && <View style={styles.unreadDot} />}
-            </View>
-            <Text style={styles.cardMessage}>{item.message}</Text>
-            <Text style={styles.cardTime}>{formatRelativeTime(item.createdAt)}</Text>
-          </TouchableOpacity>
-        )}
       />
     </View>
   );

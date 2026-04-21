@@ -10,6 +10,7 @@ import {
   RefreshControl,
   TextInput,
   BackHandler,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -164,14 +165,14 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     setRefreshing(false);
   }, [loadOrders]);
 
-  const isPaid = (order: Order) => {
+  const isPaid = useCallback((order: Order) => {
     const payment = (order.paymentStatus || '').toLowerCase();
     const status = (order.status || '').toLowerCase();
     if (status === 'shipped' || status === 'delivered') return true;
     return payment === 'paid';
-  };
+  }, []);
 
-  const updateOrderStatus = async (orderId: string, newStatus: string) => {
+  const updateOrderStatus = useCallback(async (orderId: string, newStatus: string) => {
     try {
       await updateOrder(orderId, newStatus);
       showAlert('Success', `Order marked as ${newStatus}`);
@@ -179,9 +180,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     } catch (error: any) {
       showAlert('Error', error?.message || 'Failed to update order status');
     }
-  };
+  }, [loadOrders]);
 
-  const confirmPayment = async (orderId: string) => {
+  const confirmPayment = useCallback(async (orderId: string) => {
     try {
       await updateOrderPaymentStatus(orderId, 'paid');
       showAlert('Success', 'Payment confirmed as paid');
@@ -189,9 +190,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     } catch (error: any) {
       showAlert('Error', error?.message || 'Failed to confirm payment');
     }
-  };
+  }, [loadOrders]);
 
-  const notifyPaymentNotReceived = async (orderId: string) => {
+  const notifyPaymentNotReceived = useCallback(async (orderId: string) => {
     try {
       await notifyBuyerPaymentPending(orderId);
       showAlert('Reminder Sent', 'Buyer has been notified to complete payment.');
@@ -199,17 +200,17 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     } catch (error: any) {
       showAlert('Error', error?.message || 'Failed to notify buyer');
     }
-  };
+  }, [loadOrders]);
 
-  const handleTrackingChange = (orderId: string, value: string) => {
+  const handleTrackingChange = useCallback((orderId: string, value: string) => {
     setTrackingInputs((prev) => ({ ...prev, [orderId]: value }));
-  };
+  }, []);
 
-  const handleCourierChange = (orderId: string, courier: CourierName) => {
+  const handleCourierChange = useCallback((orderId: string, courier: CourierName) => {
     setCourierInputs((prev) => ({ ...prev, [orderId]: courier }));
-  };
+  }, []);
 
-  const handleStatusChange = (order: Order) => {
+  const handleStatusChange = useCallback((order: Order) => {
     const status = (order.status || '').toLowerCase();
 
     if (status === 'pending') {
@@ -260,9 +261,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
         { text: 'Confirm', onPress: () => updateOrderStatus(order.$id, 'delivered') },
       ]);
     }
-  };
+  }, [confirmPayment, courierInputs, isPaid, loadOrders, trackingInputs, updateOrderStatus]);
 
-  const handleCancelOrder = (order: Order) => {
+  const handleCancelOrder = useCallback((order: Order) => {
     const paid = isPaid(order);
     const title = paid ? 'Cancel & Refund?' : 'Cancel Order?';
     const message = paid
@@ -273,9 +274,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
       { text: 'No', style: 'cancel' },
       { text: 'Yes, Cancel', style: 'destructive', onPress: () => updateOrderStatus(order.$id, 'cancelled') },
     ]);
-  };
+  }, [isPaid, updateOrderStatus]);
 
-  const parseItems = (rawItems: any[] | string) => {
+  const parseItems = useCallback((rawItems: any[] | string) => {
     try {
       if (Array.isArray(rawItems)) return rawItems;
       if (typeof rawItems === 'string') return JSON.parse(rawItems);
@@ -283,9 +284,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     } catch {
       return [];
     }
-  };
+  }, []);
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = useCallback((status: string) => {
     switch ((status || '').toLowerCase()) {
       case 'pending': return '#FFA500';
       case 'processing': return '#2196F3';
@@ -295,9 +296,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
       case 'refunded': return '#FF9800';
       default: return '#999';
     }
-  };
+  }, []);
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = useCallback((status: string) => {
     switch ((status || '').toLowerCase()) {
       case 'pending': return 'time-outline';
       case 'processing': return 'construct-outline';
@@ -306,18 +307,18 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
       case 'cancelled': return 'close-circle-outline';
       default: return 'help-circle-outline';
     }
-  };
+  }, []);
 
-  const getNextAction = (status: string): string | null => {
+  const getNextAction = useCallback((status: string): string | null => {
     switch ((status || '').toLowerCase()) {
       case 'pending': return 'Accept Order';
       case 'processing': return 'Mark Shipped';
       case 'shipped': return 'Confirm Delivered';
       default: return null;
     }
-  };
+  }, []);
 
-  const getPaymentMeta = (order: Order) => {
+  const getPaymentMeta = useCallback((order: Order) => {
     const payment = (order.paymentStatus || '').toLowerCase();
     const status = (order.status || '').toLowerCase();
 
@@ -326,11 +327,12 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
       return { label: 'Paid', color: '#4CAF50', icon: 'checkmark-circle' as const };
     }
     return { label: 'Pending', color: '#FFA500', icon: 'time' as const };
-  };
+  }, []);
 
-  const filteredOrders = activeTab === 'all'
-    ? orders
-    : orders.filter((o) => (o.status || '').toLowerCase() === activeTab);
+  const filteredOrders = useMemo(
+    () => (activeTab === 'all' ? orders : orders.filter((o) => (o.status || '').toLowerCase() === activeTab)),
+    [activeTab, orders]
+  );
 
   const tabCounts = useMemo(() => {
     const counts: Record<TabKey, number> = {
@@ -350,7 +352,7 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     return counts;
   }, [orders]);
 
-  const renderOrder = ({ item }: { item: Order }) => {
+  const renderOrder = useCallback(({ item }: { item: Order }) => {
     const items = parseItems(item.items);
     const paymentDone = isPaid(item);
     const paymentMeta = getPaymentMeta(item);
@@ -480,7 +482,23 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
         </View>
       </View>
     );
-  };
+  }, [
+    buyerPaymentEvents,
+    confirmPayment,
+    courierInputs,
+    getNextAction,
+    getPaymentMeta,
+    getStatusColor,
+    getStatusIcon,
+    handleCancelOrder,
+    handleCourierChange,
+    handleStatusChange,
+    handleTrackingChange,
+    isPaid,
+    notifyPaymentNotReceived,
+    parseItems,
+    trackingInputs,
+  ]);
 
   if (loading) {
     return (
@@ -537,6 +555,11 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
         data={filteredOrders}
         keyExtractor={(item) => item.$id}
         renderItem={renderOrder}
+        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        updateCellsBatchingPeriod={90}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={[styles.listContent, { paddingBottom: 16 }]}
         ListEmptyComponent={() => (
