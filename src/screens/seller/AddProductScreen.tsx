@@ -6,7 +6,6 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +19,7 @@ import { CATEGORIES } from '../../constants/categories';
 import { COLORS } from '../../constants/colors';
 import { showAlert } from '../../utils/alert';
 import { Seller } from '../../types/seller.types';
+import { useDraftStore, ProductDraft } from '../../stores/draftStore';
 import {
   validateDescription,
   validateImageCount,
@@ -27,8 +27,10 @@ import {
   validateProductName,
   validateStock,
 } from '../../utils/validation';
+import { PremiumImage } from '../../components/PremiumImage';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
-const AddProductScreen = () => {
+const AddProductScreen = ({ navigation }: any) => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [sellerLoading, setSellerLoading] = useState(true);
@@ -44,6 +46,64 @@ const AddProductScreen = () => {
   });
 
   const [images, setImages] = useState<string[]>([]);
+
+  const { drafts, loadDrafts, saveDraft, deleteDraft } = useDraftStore();
+  const [loadedDraftId, setLoadedDraftId] = useState<string | null>(null);
+  const [showDraftsList, setShowDraftsList] = useState(false);
+
+  useEffect(() => {
+    loadDrafts();
+  }, []);
+
+  const handleSaveDraft = async () => {
+    if (!formData.name.trim() && !formData.description.trim() && images.length === 0) {
+      showAlert('Draft Empty', 'Please enter some product details or add images before saving a draft.');
+      return;
+    }
+
+    try {
+      await saveDraft({
+        name: formData.name.trim(),
+        category: formData.category,
+        price: formData.price,
+        description: formData.description.trim(),
+        stock: formData.stock,
+        deliveryOption: formData.deliveryOption,
+        images,
+      }, loadedDraftId || undefined);
+      
+      loadDrafts();
+      showAlert('Success', 'Draft saved successfully!');
+    } catch (error: any) {
+      showAlert('Error', error.message || 'Failed to save draft');
+    }
+  };
+
+  const handleLoadDraft = (draft: ProductDraft) => {
+    setFormData({
+      name: draft.name,
+      category: draft.category,
+      price: draft.price,
+      description: draft.description,
+      stock: draft.stock,
+      deliveryOption: draft.deliveryOption,
+    });
+    setImages(draft.images);
+    setLoadedDraftId(draft.id);
+    setShowDraftsList(false);
+  };
+
+  const handleDeleteDraft = async (id: string) => {
+    try {
+      await deleteDraft(id);
+      if (loadedDraftId === id) {
+        setLoadedDraftId(null);
+      }
+      loadDrafts();
+    } catch {
+      showAlert('Error', 'Failed to delete draft');
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -185,6 +245,12 @@ const AddProductScreen = () => {
       });
       setImages([]);
 
+      if (loadedDraftId) {
+        await deleteDraft(loadedDraftId);
+        setLoadedDraftId(null);
+        loadDrafts();
+      }
+
       showAlert('Success!', 'Your product has been submitted for review.');
     } catch (error: any) {
       showAlert('Error', error.message || 'Failed to add product');
@@ -219,12 +285,77 @@ const AddProductScreen = () => {
       extraScrollHeight={24}
       extraHeight={120}
     >
-      <View style={styles.header}>
-        <Text style={styles.title}>Add New Product</Text>
-        <Text style={styles.subtitle}>Submit accurate details for faster approval</Text>
-      </View>
+      <PremiumTopBar
+        title="Add Product"
+        subtitle="Submit accurate details for faster approval"
+        icon="add-circle-outline"
+        showBack={navigation?.canGoBack?.()}
+        onBack={() => navigation?.goBack?.()}
+      />
 
       <View style={styles.form}>
+        {drafts.length > 0 && (
+          <View style={styles.draftsSection}>
+            <TouchableOpacity
+              style={styles.draftsHeaderButton}
+              onPress={() => setShowDraftsList(!showDraftsList)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="folder-open-outline" size={18} color={COLORS.primary} />
+              <Text style={styles.draftsHeaderText}>
+                Saved Drafts ({drafts.length}) {showDraftsList ? '▲' : '▼'}
+              </Text>
+            </TouchableOpacity>
+
+            {showDraftsList && (
+              <View style={styles.draftsList}>
+                {drafts.map((draft) => (
+                  <View key={draft.id} style={styles.draftItem}>
+                    <TouchableOpacity
+                      style={styles.draftItemClickable}
+                      onPress={() => handleLoadDraft(draft)}
+                    >
+                      <Text style={styles.draftTitle} numberOfLines={1}>
+                        {draft.name || 'Untitled Draft'}
+                      </Text>
+                      <Text style={styles.draftSubtitle}>
+                        {draft.category ? draft.category.charAt(0).toUpperCase() + draft.category.slice(1) : 'No Category'} • ₹{draft.price || '0'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.draftDeleteButton}
+                      onPress={() => handleDeleteDraft(draft.id)}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={COLORS.error} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {loadedDraftId && (
+          <View style={styles.loadedDraftBadge}>
+            <Ionicons name="create-outline" size={16} color="#92400E" />
+            <Text style={styles.loadedDraftBadgeText}>Editing locally saved draft</Text>
+            <TouchableOpacity onPress={() => {
+              setLoadedDraftId(null);
+              setFormData({
+                name: '',
+                category: '',
+                price: '',
+                stock: '',
+                description: '',
+                deliveryOption: 'pickup',
+              });
+              setImages([]);
+            }}>
+              <Text style={styles.loadedDraftClearText}>Clear</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={styles.locationBox}>
           <Ionicons name="location-outline" size={18} color={COLORS.primary} />
           <View style={styles.locationBoxTextWrap}>
@@ -333,7 +464,11 @@ const AddProductScreen = () => {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesScroll}>
             {images.map((uri, index) => (
               <View key={index} style={styles.imageContainer}>
-                <Image source={{ uri }} style={styles.productImage} />
+                <PremiumImage
+                  uri={uri}
+                  style={styles.productImage}
+                  variant="product"
+                />
                 <TouchableOpacity style={styles.removeImageButton} onPress={() => handleRemoveImage(index)}>
                   <Text style={styles.removeImageText}>✕</Text>
                 </TouchableOpacity>
@@ -348,20 +483,30 @@ const AddProductScreen = () => {
           </ScrollView>
         </View>
 
-        <TouchableOpacity
-          style={[styles.submitButton, loading && styles.submitButtonDisabled]}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Ionicons name="checkmark-circle-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-              <Text style={styles.submitButtonText}>Submit for Review</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={styles.saveDraftButton}
+            onPress={handleSaveDraft}
+          >
+            <Ionicons name="save-outline" size={18} color={COLORS.primary} style={{ marginRight: 6 }} />
+            <Text style={styles.saveDraftButtonText}>Save Draft</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="checkmark-circle-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.submitButtonText}>Submit Review</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.noteBox}>
           <Ionicons name="information-circle" size={20} color={COLORS.primary} />
@@ -377,13 +522,13 @@ const AddProductScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: COLORS.background,
     paddingHorizontal: 24,
   },
   errorText: {
@@ -392,24 +537,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
   },
-  header: {
-    backgroundColor: COLORS.primary,
-    padding: 20,
-    paddingTop: 20,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#fff',
-    opacity: 0.9,
-  },
   form: {
-    padding: 20,
+    padding: 16,
   },
   locationBox: {
     flexDirection: 'row',
@@ -441,17 +570,18 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: '700',
+    color: COLORS.text,
     marginBottom: 8,
   },
   input: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
+    backgroundColor: COLORS.surface,
+    borderRadius: 10,
     padding: 14,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: COLORS.border,
+    color: COLORS.text,
   },
   textArea: {
     height: 120,
@@ -461,13 +591,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   categoryChip: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
     marginRight: 10,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: COLORS.border,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -481,7 +611,7 @@ const styles = StyleSheet.create({
   },
   categoryText: {
     fontSize: 14,
-    color: '#666',
+    color: COLORS.textSecondary,
   },
   categoryTextSelected: {
     color: '#fff',
@@ -493,11 +623,11 @@ const styles = StyleSheet.create({
   },
   optionChip: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: COLORS.border,
     alignItems: 'center',
   },
   optionChipSelected: {
@@ -506,7 +636,7 @@ const styles = StyleSheet.create({
   },
   optionText: {
     fontSize: 14,
-    color: '#666',
+    color: COLORS.textSecondary,
   },
   optionTextSelected: {
     color: '#fff',
@@ -522,7 +652,7 @@ const styles = StyleSheet.create({
   productImage: {
     width: 100,
     height: 100,
-    borderRadius: 8,
+    borderRadius: 10,
   },
   removeImageButton: {
     position: 'absolute',
@@ -543,10 +673,10 @@ const styles = StyleSheet.create({
   addImageButton: {
     width: 100,
     height: 100,
-    backgroundColor: '#fff',
-    borderRadius: 8,
+    backgroundColor: COLORS.surface,
+    borderRadius: 10,
     borderWidth: 2,
-    borderColor: '#e0e0e0',
+    borderColor: COLORS.border,
     borderStyle: 'dashed',
     justifyContent: 'center',
     alignItems: 'center',
@@ -557,16 +687,16 @@ const styles = StyleSheet.create({
   },
   addImageText: {
     fontSize: 12,
-    color: '#666',
+    color: COLORS.textSecondary,
   },
   submitButton: {
     backgroundColor: COLORS.primary,
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 10,
+    flex: 1.3,
   },
   submitButtonDisabled: {
     opacity: 0.6,
@@ -574,7 +704,99 @@ const styles = StyleSheet.create({
   submitButtonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '700',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  saveDraftButton: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+  },
+  saveDraftButtonText: {
+    color: COLORS.primary,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  draftsSection: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 18,
+    overflow: 'hidden',
+  },
+  draftsHeaderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 8,
+    backgroundColor: COLORS.card,
+  },
+  draftsHeaderText: {
+    fontSize: 14,
     fontWeight: '600',
+    color: COLORS.text,
+  },
+  draftsList: {
+    padding: 6,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  draftItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F4',
+  },
+  draftItemClickable: {
+    flex: 1,
+  },
+  draftTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  draftSubtitle: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  draftDeleteButton: {
+    padding: 8,
+  },
+  loadedDraftBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    gap: 6,
+  },
+  loadedDraftBadgeText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#92400E',
+    fontWeight: '600',
+  },
+  loadedDraftClearText: {
+    fontSize: 13,
+    color: COLORS.error,
+    fontWeight: '700',
   },
   noteBox: {
     backgroundColor: '#E3F2FD',
@@ -591,7 +813,7 @@ const styles = StyleSheet.create({
   noteText: {
     flex: 1,
     fontSize: 13,
-    color: '#555',
+    color: COLORS.textSecondary,
     lineHeight: 20,
   },
 });

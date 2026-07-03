@@ -9,10 +9,11 @@ import {
 } from '../types/product.types';
 import { PaginatedResponse } from '../types/common.types';
 import { sendNotification } from './notificationService';
-import { getSellerById } from './sellerService';
+import { getSellerById, registerSellerInvalidationListener } from './sellerService';
 import { Seller } from '../types/seller.types';
 import { calculateTrustScore, isTopArtisan } from '../utils/trustScore';
 import { INDIAN_STATES } from '../constants/regions';
+import { CATEGORIES } from '../constants/categories';
 import {
   validateDescription,
   validateImageCount,
@@ -23,7 +24,70 @@ import {
 } from '../utils/validation';
 
 const sellerSearchCache = new Map<string, Seller | null>();
+const sellerSearchCacheTimestamps = new Map<string, number>();
 const SELLER_CACHE_MAX_SIZE = 500;
+const SELLER_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+let allApprovedSellersCache: Seller[] | null = null;
+let allApprovedSellersTimestamp = 0;
+const APPROVED_SELLERS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export const getAllApprovedSellers = async (): Promise<Seller[]> => {
+  if (allApprovedSellersCache && (Date.now() - allApprovedSellersTimestamp < APPROVED_SELLERS_CACHE_TTL_MS)) {
+    return allApprovedSellersCache;
+  }
+
+  try {
+    const response = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.sellersCollectionId,
+      [
+        Query.equal('verificationStatus', 'approved'),
+        Query.limit(1000),
+      ]
+    );
+    allApprovedSellersCache = response.documents as unknown as Seller[];
+    allApprovedSellersTimestamp = Date.now();
+
+    // Populate sellerSearchCache to make individual lookups instant
+    allApprovedSellersCache.forEach((seller) => {
+      sellerSearchCache.set(seller.$id, seller);
+      sellerSearchCacheTimestamps.set(seller.$id, Date.now());
+    });
+
+    return allApprovedSellersCache;
+  } catch (error) {
+    console.error('Error fetching all approved sellers:', error);
+    return allApprovedSellersCache || [];
+  }
+};
+
+// Search results memory cache for zero-latency back-and-forth filtering
+const searchResultsCache = new Map<string, { response: PaginatedResponse<Product>; timestamp: number }>();
+const SEARCH_CACHE_MAX_SIZE = 100;
+const SEARCH_CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL
+
+// Global in-memory cache for product lookups
+export const productCache = new Map<string, Product>();
+const PRODUCT_CACHE_MAX_SIZE = 1000;
+
+// Register invalidation listener
+registerSellerInvalidationListener((sellerId) => {
+  if (sellerId === '*') {
+    sellerSearchCache.clear();
+    sellerSearchCacheTimestamps.clear();
+  } else {
+    sellerSearchCache.delete(sellerId);
+    sellerSearchCacheTimestamps.delete(sellerId);
+  }
+  allApprovedSellersCache = null;
+  allApprovedSellersTimestamp = 0;
+  searchResultsCache.clear();
+});
+
+export const getCachedProductSync = (productId: string): Product | null => {
+  return productCache.get(productId) || null;
+};
 
 const normalizeText = (value?: string): string =>
   (value || '').replace(/\s+/g, ' ').trim();
@@ -203,15 +267,22 @@ const regionValueMatches = (haystack: string, aliases: Set<string>): boolean => 
 const getCachedSeller = async (sellerId: string): Promise<Seller | null> => {
   if (!sellerId) return null;
   if (sellerSearchCache.has(sellerId)) {
-    return sellerSearchCache.get(sellerId) || null;
+    const ts = sellerSearchCacheTimestamps.get(sellerId) || 0;
+    if (Date.now() - ts < SELLER_SEARCH_CACHE_TTL_MS) {
+      return sellerSearchCache.get(sellerId) || null;
+    }
+    sellerSearchCache.delete(sellerId);
+    sellerSearchCacheTimestamps.delete(sellerId);
   }
 
   if (sellerSearchCache.size >= SELLER_CACHE_MAX_SIZE) {
     sellerSearchCache.clear();
+    sellerSearchCacheTimestamps.clear();
   }
 
   const seller = await getSellerById(sellerId).catch(() => null);
   sellerSearchCache.set(sellerId, seller);
+  sellerSearchCacheTimestamps.set(sellerId, Date.now());
   return seller;
 };
 
@@ -219,20 +290,31 @@ const loadSellersForIds = async (
   sellerIds: string[],
   sellerMap: Map<string, Seller | null>
 ): Promise<void> => {
-  const pending = sellerIds.filter((sellerId) => !sellerMap.has(sellerId));
-  if (pending.length === 0) {
-    return;
+  const pending = sellerIds.filter((id) => !sellerSearchCache.has(id));
+  
+  if (pending.length > 0) {
+    try {
+      const batchSize = 100;
+      for (let i = 0; i < pending.length; i += batchSize) {
+        const chunk = pending.slice(i, i + batchSize);
+        const response = await databases.listDocuments(
+          appwriteConfig.databaseId,
+          appwriteConfig.sellersCollectionId,
+          [Query.equal('$id', chunk), Query.limit(chunk.length)]
+        );
+        const docs = response.documents as unknown as Seller[];
+        docs.forEach((seller) => {
+          sellerSearchCache.set(seller.$id, seller);
+          sellerSearchCacheTimestamps.set(seller.$id, Date.now());
+        });
+      }
+    } catch (error) {
+      console.error('Error batch loading sellers:', error);
+    }
   }
 
-  const sellerResults = await Promise.all(
-    pending.map(async (sellerId) => ({
-      sellerId,
-      seller: await getCachedSeller(sellerId),
-    }))
-  );
-
-  sellerResults.forEach(({ sellerId, seller }) => {
-    sellerMap.set(sellerId, seller);
+  sellerIds.forEach((id) => {
+    sellerMap.set(id, sellerSearchCache.get(id) || null);
   });
 };
 
@@ -293,6 +375,7 @@ const sortProductsByFilter = (products: Product[], sortBy?: ProductFilters['sort
  */
 export const createProduct = async (data: CreateProductDTO): Promise<Product> => {
   try {
+    searchResultsCache.clear();
     const payload = sanitizeCreateProductPayload(data);
     const now = new Date().toISOString();
     const product = await databases.createDocument(
@@ -319,7 +402,14 @@ export const createProduct = async (data: CreateProductDTO): Promise<Product> =>
       }
     );
 
-    return product as unknown as Product;
+    const result = product as unknown as Product;
+    if (result && result.$id) {
+      if (productCache.size >= PRODUCT_CACHE_MAX_SIZE) {
+        productCache.clear();
+      }
+      productCache.set(result.$id, result);
+    }
+    return result;
   } catch (error) {
     console.error('Error creating product:', error);
     throw error;
@@ -330,13 +420,23 @@ export const createProduct = async (data: CreateProductDTO): Promise<Product> =>
  * Get product by ID
  */
 export const getProductById = async (productId: string): Promise<Product | null> => {
+  if (productCache.has(productId)) {
+    return productCache.get(productId) || null;
+  }
   try {
     const doc = await databases.getDocument(
       appwriteConfig.databaseId,
       appwriteConfig.productsCollectionId,
       productId
     );
-    return doc as unknown as Product;
+    const prod = doc as unknown as Product;
+    if (prod) {
+      if (productCache.size >= PRODUCT_CACHE_MAX_SIZE) {
+        productCache.clear();
+      }
+      productCache.set(productId, prod);
+    }
+    return prod;
   } catch (error) {
     console.error('Error fetching product:', error);
     return null;
@@ -351,6 +451,7 @@ export const updateProduct = async (
   data: UpdateProductDTO
 ): Promise<Product> => {
   try {
+    searchResultsCache.clear();
     const payload = sanitizeUpdateProductPayload(data);
     const updated = await databases.updateDocument(
       appwriteConfig.databaseId,
@@ -362,7 +463,11 @@ export const updateProduct = async (
       }
     );
 
-    return updated as unknown as Product;
+    const result = updated as unknown as Product;
+    if (result && result.$id) {
+      productCache.set(result.$id, result);
+    }
+    return result;
   } catch (error) {
     console.error('Error updating product:', error);
     throw new Error('Failed to update product');
@@ -374,6 +479,8 @@ export const updateProduct = async (
  */
 export const deleteProduct = async (productId: string): Promise<void> => {
   try {
+    searchResultsCache.clear();
+    productCache.delete(productId);
     await databases.deleteDocument(
       appwriteConfig.databaseId,
       appwriteConfig.productsCollectionId,
@@ -454,8 +561,30 @@ export const getProducts = async (
       queries
     );
 
+    const products = response.documents as unknown as Product[];
+    const sellerMap = new Map<string, Seller | null>();
+    const uniqueSellerIds = [...new Set(products.map((product) => product.sellerId).filter(Boolean))];
+
+    if (uniqueSellerIds.length > 0) {
+      await loadSellersForIds(uniqueSellerIds, sellerMap);
+    }
+
+    const visibleProducts = products.filter((product) => {
+      const seller = sellerMap.get(product.sellerId) || null;
+      return seller?.verificationStatus !== 'blocked';
+    });
+
+    if (productCache.size + products.length >= PRODUCT_CACHE_MAX_SIZE) {
+      productCache.clear();
+    }
+    visibleProducts.forEach((p) => {
+      if (p && p.$id) {
+        productCache.set(p.$id, p);
+      }
+    });
+
     return {
-      data: response.documents as unknown as Product[],
+      data: visibleProducts,
       total: response.total,
       page,
       perPage,
@@ -471,64 +600,269 @@ export const getProducts = async (
  * Marketplace-aware buyer search.
  * Supports product + shop + locality matching (state/city/address/village-like text)
  */
+const buildBaseProductQueries = (filters: ProductFilters): any[] => {
+  const queries: any[] = [
+    Query.equal('status', 'active'),
+  ];
+
+  if (filters.category) {
+    queries.push(Query.equal('category', filters.category));
+  }
+
+  if (filters.minPrice !== undefined) {
+    queries.push(Query.greaterThanEqual('price', filters.minPrice));
+  }
+
+  if (filters.maxPrice !== undefined) {
+    queries.push(Query.lessThanEqual('price', filters.maxPrice));
+  }
+
+  if (filters.minRating !== undefined) {
+    queries.push(Query.greaterThanEqual('rating', filters.minRating));
+  }
+
+  return queries;
+};
+
+/**
+ * Marketplace-aware buyer search.
+ * Supports product + shop + locality matching (state/city/address/village-like text)
+ */
 export const searchMarketplaceProducts = async (
   filters: ProductFilters = {},
   page: number = 1,
   perPage: number = 20
 ): Promise<PaginatedResponse<Product>> => {
+  const cacheKey = JSON.stringify({ filters, page, perPage });
+  
+  if (searchResultsCache.has(cacheKey)) {
+    const entry = searchResultsCache.get(cacheKey)!;
+    if (Date.now() - entry.timestamp < SEARCH_CACHE_TTL_MS) {
+      return entry.response;
+    }
+    searchResultsCache.delete(cacheKey);
+  }
+
   try {
-    let baseFilters: ProductFilters = {
-      ...filters,
-      searchQuery: undefined,
-      localityQuery: undefined,
-      verifiedSellers: undefined,
-      topArtisansOnly: undefined,
-    };
-
-    let firstBatch = await getProducts(baseFilters, 1, 120);
-    if (filters.region && firstBatch.total === 0) {
-      baseFilters = {
-        ...baseFilters,
-        region: undefined,
-      };
-      firstBatch = await getProducts(baseFilters, 1, 120);
-    }
-
-    const collectedProducts: Product[] = [...firstBatch.data];
-
-    let nextPage = 2;
-    let hasMore = firstBatch.hasMore;
-
-    // Keep a practical cap to avoid overfetching while still enabling rich filtering.
-    while (hasMore && collectedProducts.length < 360) {
-      const nextBatch = await getProducts(baseFilters, nextPage, 120);
-      collectedProducts.push(...nextBatch.data);
-      hasMore = nextBatch.hasMore;
-      nextPage += 1;
-    }
-
     const queryTokens = tokenizeSearchQuery(filters.searchQuery);
     const localityText = normalizeSearchText(filters.localityQuery);
     const regionAliases = resolveRegionAliases(filters.region);
-    const requiresSellerDataForFiltering =
-      queryTokens.length > 0 ||
-      Boolean(localityText) ||
-      regionAliases.size > 0 ||
-      Boolean(filters.verifiedSellers) ||
-      Boolean(filters.topArtisansOnly);
-    const requiresSellerDataForSorting = filters.sortBy === 'trust_high';
 
+    const isHomeRegion = filters.isHomeRegionScope;
+    const shouldBypassRegion = isHomeRegion && !!filters.searchQuery;
+
+    // Dynamically resolve 6-digit PIN code to all matching names in-memory
+    const resolvedLocalityNames = new Set<string>();
+    if (/^\d{6}$/.test(localityText)) {
+      try {
+        const { getIndiaPincode } = require('india-pincode/browser');
+        const client = await getIndiaPincode();
+        const res = client.search(localityText);
+        if (res.success && res.data) {
+          res.data.data.forEach((office: any) => {
+            if (office.Name) resolvedLocalityNames.add(normalizeSearchText(office.Name));
+            if (office.District) resolvedLocalityNames.add(normalizeSearchText(office.District));
+            if (office.Circle) resolvedLocalityNames.add(normalizeSearchText(office.Circle));
+          });
+        }
+      } catch (err) {
+        console.error('Error resolving PIN code in search:', err);
+      }
+    }
+
+    // Get all approved sellers once (cached for 5m, listeners invalidate)
+    const approvedSellers = await getAllApprovedSellers();
+    const approvedSellerIds = new Set(approvedSellers.map((s) => s.$id));
+    // Find sellers matching query tokens and localityText
+    let matchingSellerIds: string[] = [];
+    if (queryTokens.length > 0 || localityText) {
+      const matchingSellers = approvedSellers.filter((seller) => {
+        const sellerLocationText = [
+          seller.city,
+          seller.district,
+          seller.village,
+          seller.state,
+          seller.region,
+          seller.address,
+        ]
+          .filter((s): s is string => typeof s === 'string')
+          .map((s) => s.toLowerCase())
+          .join(' ');
+
+        const sellerAllText = [
+          seller.businessName,
+          seller.craftType,
+          sellerLocationText,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        const matchesSearch =
+          queryTokens.length === 0 ||
+          queryTokens.some((token) => sellerAllText.includes(token));
+
+        const matchesLocality =
+          !localityText || sellerLocationText.includes(localityText);
+
+        return matchesSearch && matchesLocality;
+      });
+      matchingSellerIds = matchingSellers.map((s) => s.$id);
+    }
+
+    // Build base queries applied to all database requests
+    const baseQueries = buildBaseProductQueries(filters);
+    const promises: Promise<any[]>[] = [];
+
+    // 1. If searchQuery is provided, query products by name matching searchQuery
+    if (filters.searchQuery) {
+      promises.push(
+        databases
+          .listDocuments(appwriteConfig.databaseId, appwriteConfig.productsCollectionId, [
+            ...baseQueries,
+            Query.search('name', filters.searchQuery),
+            Query.limit(150),
+          ])
+          .then((res) => res.documents)
+          .catch((err) => {
+            console.error('Error querying products by name search:', err);
+            return [];
+          })
+      );
+    }
+
+    // 2. If matching sellers are found, query products from those sellers
+    if (matchingSellerIds.length > 0) {
+      const slicedSellerIds = matchingSellerIds.slice(0, 100);
+      promises.push(
+        databases
+          .listDocuments(appwriteConfig.databaseId, appwriteConfig.productsCollectionId, [
+            ...baseQueries,
+            Query.equal('sellerId', slicedSellerIds),
+            Query.limit(150),
+          ])
+          .then((res) => res.documents)
+          .catch((err) => {
+            console.error('Error querying products by sellerId:', err);
+            return [];
+          })
+      );
+    }
+
+    // 3. Check if any tokens match Indian state names/IDs
+    const matchedStates = INDIAN_STATES.filter((state) =>
+      queryTokens.some(
+        (token) =>
+          state.name.toLowerCase() === token || state.id.toLowerCase() === token
+      )
+    );
+    if (matchedStates.length > 0) {
+      const stateNames = matchedStates.map((s) => s.name);
+      promises.push(
+        databases
+          .listDocuments(appwriteConfig.databaseId, appwriteConfig.productsCollectionId, [
+            ...baseQueries,
+            Query.equal('state', stateNames),
+            Query.limit(150),
+          ])
+          .then((res) => res.documents)
+          .catch((err) => {
+            console.error('Error querying products by state names:', err);
+            return [];
+          })
+      );
+    }
+
+    // 4. Check if any tokens match category names
+    const matchedCategories = CATEGORIES.filter((cat) =>
+      queryTokens.some(
+        (token) =>
+          cat.name.toLowerCase().includes(token) || cat.id.toLowerCase() === token
+      )
+    );
+    if (matchedCategories.length > 0) {
+      const categoryIds = matchedCategories.map((c) => c.id);
+      promises.push(
+        databases
+          .listDocuments(appwriteConfig.databaseId, appwriteConfig.productsCollectionId, [
+            ...baseQueries,
+            Query.equal('category', categoryIds),
+            Query.limit(150),
+          ])
+          .then((res) => res.documents)
+          .catch((err) => {
+            console.error('Error querying products by category search:', err);
+            return [];
+          })
+      );
+    }
+
+    // 4.5 If region is specified and not bypassed, query products by region/state matching filters.region
+    if (filters.region && !shouldBypassRegion && regionAliases.size > 0) {
+      const stateNames = Array.from(regionAliases);
+      promises.push(
+        databases
+          .listDocuments(appwriteConfig.databaseId, appwriteConfig.productsCollectionId, [
+            ...baseQueries,
+            Query.equal('state', stateNames),
+            Query.limit(150),
+          ])
+          .then((res) => res.documents)
+          .catch((err) => {
+            console.error('Error querying products by explicit state filter:', err);
+            return [];
+          })
+      );
+    }
+
+    // 5. If no search constraints are active, just query all active products matching base filters
+    if (promises.length === 0) {
+      promises.push(
+        databases
+          .listDocuments(appwriteConfig.databaseId, appwriteConfig.productsCollectionId, [
+            ...baseQueries,
+            Query.limit(300),
+          ])
+          .then((res) => res.documents)
+          .catch((err) => {
+            console.error('Error querying products by base filters:', err);
+            return [];
+          })
+      );
+    }
+
+    // Execute database queries in parallel
+    const queryResults = await Promise.all(promises);
+
+    // Merge and deduplicate candidates by $id
+    const candidateMap = new Map<string, Product>();
+    queryResults.forEach((docs) => {
+      docs.forEach((doc) => {
+        const prod = doc as unknown as Product;
+        candidateMap.set(prod.$id, prod);
+      });
+    });
+
+    const candidates = Array.from(candidateMap.values());
     const sellerMap = new Map<string, Seller | null>();
 
-    if (requiresSellerDataForFiltering || requiresSellerDataForSorting) {
-      const uniqueSellerIds = [...new Set(collectedProducts.map((p) => p.sellerId).filter(Boolean))];
+    // Load seller info for candidates using the bulk seller cache loader
+    const uniqueSellerIds = [...new Set(candidates.map((p) => p.sellerId).filter(Boolean))];
+    if (uniqueSellerIds.length > 0) {
       await loadSellersForIds(uniqueSellerIds, sellerMap);
     }
 
-    const filtered = collectedProducts.filter((product) => {
+    // In-memory filter candidates with high precision
+    const filtered = candidates.filter((product) => {
+      // 1. Only show products from approved sellers
+      if (!approvedSellerIds.has(product.sellerId)) {
+        return false;
+      }
+
       const seller = sellerMap.get(product.sellerId) || null;
 
-      if (regionAliases.size > 0) {
+      // 2. Filter by regionAliases if region is requested AND it is not bypassed
+      if (regionAliases.size > 0 && !shouldBypassRegion) {
         const regionHaystack = normalizeSearchText(
           [product.region, product.state, seller?.state, seller?.region]
             .filter(Boolean)
@@ -540,6 +874,7 @@ export const searchMarketplaceProducts = async (
         }
       }
 
+      // 3. Filter by verified sellers only
       if (
         filters.verifiedSellers &&
         !(seller?.verifiedBadge || seller?.verificationStatus === 'approved')
@@ -547,38 +882,44 @@ export const searchMarketplaceProducts = async (
         return false;
       }
 
+      // 4. Filter by top artisans only
       if (filters.topArtisansOnly && !(seller && isTopArtisan(seller))) {
         return false;
       }
 
+      // 5. Filter by delivery options (stock must be > 0 if delivery available is chosen)
       if (filters.deliveryAvailable && (product.stock || 0) < 1) {
         return false;
       }
 
-      const searchableText = normalizeSearchText(
-        [
-          product.name,
-          product.description,
-          product.category,
-          product.region,
-          product.state,
-          seller?.businessName,
-          seller?.craftType,
-          seller?.city,
-          seller?.district,
-          seller?.village,
-          seller?.state,
-          seller?.region,
-          seller?.address,
-        ]
-          .filter(Boolean)
-          .join(' ')
-      );
+      // 6. Detailed multi-token search match on both product and seller fields
+      if (queryTokens.length > 0) {
+        const searchableText = normalizeSearchText(
+          [
+            product.name,
+            product.description,
+            product.category,
+            product.region,
+            product.state,
+            seller?.businessName,
+            seller?.craftType,
+            seller?.city,
+            seller?.district,
+            seller?.village,
+            seller?.state,
+            seller?.region,
+            seller?.address,
+          ]
+            .filter(Boolean)
+            .join(' ')
+        );
 
-      if (queryTokens.length > 0 && !containsAllTokens(searchableText, queryTokens)) {
-        return false;
+        if (!containsAllTokens(searchableText, queryTokens)) {
+          return false;
+        }
       }
 
+      // 7. Detailed locality search match on seller location fields
       if (localityText) {
         const localityHaystack = normalizeSearchText(
           [
@@ -595,7 +936,11 @@ export const searchMarketplaceProducts = async (
             .join(' ')
         );
 
-        if (!localityHaystack.includes(localityText)) {
+        const matchesLocalityText = localityHaystack.includes(localityText);
+        const matchesResolvedPincode = resolvedLocalityNames.size > 0 && 
+          Array.from(resolvedLocalityNames).some(name => localityHaystack.includes(name));
+
+        if (!matchesLocalityText && !matchesResolvedPincode) {
           return false;
         }
       }
@@ -603,6 +948,8 @@ export const searchMarketplaceProducts = async (
       return true;
     });
 
+    // Sort products
+    const requiresSellerDataForSorting = filters.sortBy === 'trust_high';
     const sortableProducts = requiresSellerDataForSorting
       ? enrichProductsWithSellerData(filtered, sellerMap)
       : filtered;
@@ -611,18 +958,26 @@ export const searchMarketplaceProducts = async (
     const offset = Math.max(0, (page - 1) * perPage);
     const pagedBase = sortedBase.slice(offset, offset + perPage);
 
+    // Ensure seller data is fully loaded for the paginated slice
     const pageSellerIds = [...new Set(pagedBase.map((p) => p.sellerId).filter(Boolean))];
     await loadSellersForIds(pageSellerIds, sellerMap);
 
     const paged = enrichProductsWithSellerData(pagedBase, sellerMap);
 
-    return {
+    const finalResult = {
       data: paged,
       total: sortedBase.length,
       page,
       perPage,
       hasMore: offset + pagedBase.length < sortedBase.length,
     };
+
+    if (searchResultsCache.size >= SEARCH_CACHE_MAX_SIZE) {
+      searchResultsCache.clear();
+    }
+    searchResultsCache.set(cacheKey, { response: finalResult, timestamp: Date.now() });
+
+    return finalResult;
   } catch (error) {
     console.error('Error in marketplace product search:', error);
     throw new Error('Failed to search marketplace products');
@@ -655,7 +1010,16 @@ export const getProductsBySeller = async (
       queries
     );
 
-    return response.documents as unknown as Product[];
+    const products = response.documents as unknown as Product[];
+    if (productCache.size + products.length >= PRODUCT_CACHE_MAX_SIZE) {
+      productCache.clear();
+    }
+    products.forEach((p) => {
+      if (p && p.$id) {
+        productCache.set(p.$id, p);
+      }
+    });
+    return products;
   } catch (error) {
     console.error('Error fetching seller products:', error);
     return [];
@@ -676,7 +1040,16 @@ export const getPendingProducts = async (): Promise<Product[]> => {
       ]
     );
 
-    return response.documents as unknown as Product[];
+    const products = response.documents as unknown as Product[];
+    if (productCache.size + products.length >= PRODUCT_CACHE_MAX_SIZE) {
+      productCache.clear();
+    }
+    products.forEach((p) => {
+      if (p && p.$id) {
+        productCache.set(p.$id, p);
+      }
+    });
+    return products;
   } catch (error) {
     console.error('Error fetching pending products:', error);
     return [];
@@ -716,7 +1089,11 @@ export const approveProduct = async (data: ApproveProductDTO): Promise<Product> 
       await sendNotification(seller.userId, message, 'product_approval', product.$id, 'product');
     }
 
-    return updated as unknown as Product;
+    const result = updated as unknown as Product;
+    if (result && result.$id) {
+      productCache.set(result.$id, result);
+    }
+    return result;
   } catch (error) {
     console.error('Error approving product:', error);
     throw new Error('Failed to approve product');
@@ -784,5 +1161,29 @@ export const toggleFeatured = async (productId: string, featured: boolean): Prom
   } catch (error) {
     console.error('Error toggling featured status:', error);
     throw new Error('Failed to update featured status');
+  }
+};
+
+/**
+ * Get dynamic product title suggestions from the database in real-time
+ */
+export const getProductSuggestions = async (query: string): Promise<string[]> => {
+  if (!query || query.trim().length < 2) {
+    return [];
+  }
+  try {
+    const response = await databases.listDocuments(
+      appwriteConfig.databaseId,
+      appwriteConfig.productsCollectionId,
+      [
+        Query.equal('status', 'active'),
+        Query.search('name', query.trim()),
+        Query.limit(5),
+      ]
+    );
+    return response.documents.map((doc: any) => doc.name);
+  } catch (error) {
+    console.error('Error fetching product suggestions:', error);
+    return [];
   }
 };

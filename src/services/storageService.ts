@@ -1,7 +1,7 @@
 import { ID, Query } from 'appwrite';
 import { databases, storage, appwriteConfig, account, client } from '../config/appwrite';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 /**

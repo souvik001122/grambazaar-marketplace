@@ -12,34 +12,178 @@ import {
   Platform,
   Modal,
   Pressable,
+  InteractionManager,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Image as ExpoImage } from 'expo-image';
 import { ProductCard } from '../../components/ProductCard';
 import { SellerCard } from '../../components/SellerCard';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { Product } from '../../types/product.types';
 import { Seller } from '../../types/seller.types';
 import { getProducts } from '../../services/productService';
-import { getSellersByRegion, getTopVerifiedSellers } from '../../services/sellerService';
+import { getSellersByRegion, getTopVerifiedSellers, clearAllSellerCaches } from '../../services/sellerService';
 import { COLORS } from '../../constants/colors';
-import { CATEGORIES } from '../../constants/categories';
 import { INDIAN_STATES } from '../../constants/regions';
 import { BUYER_LAYOUT } from '../../constants/layout';
 import * as Location from 'expo-location';
 import { useAuth } from '../../context/AuthContext';
 import { useCartStore } from '../../stores/cartStore';
-import { calculateTrustScore, isTopArtisan } from '../../utils/trustScore';
+import {
+  rankProductsByBestRated,
+  rankProductsByFreshArrivals,
+  rankProductsByTrending,
+  rankSellersForTopArtisans,
+} from '../../utils/homeRanking';
+import { normalizeImageList, resolveImageUrl } from '../../services/storageService';
+import { appwriteConfig } from '../../config/appwrite';
+import { readHomeCache, writeHomeCache } from '../../utils/persistentCache';
 
-const FRESH_PAGE_SIZE = 8;
+const FRESH_PAGE_SIZE = 6;
 const DEFAULT_REGION = 'Haryana';
 const ALL_INDIA_REGION = 'All India';
-const REGION_BOOTSTRAP_TIMEOUT_MS = 1200;
+const REGION_BOOTSTRAP_TIMEOUT_MS = 400;
+const CURATED_TOP_RATED_FETCH_SIZE = 12;
+const CURATED_TRENDING_FETCH_SIZE = 12;
+const HOME_PREFETCH_COUNT = 8;
+const HOME_CURATED_PREFETCH_COUNT = 4;
+const HOME_SELLER_PREFETCH_COUNT = 4;
+const HOME_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
+
+type HomeSnapshot = {
+  userId: string;
+  selectedRegion: string;
+  autoRegionLabel: string;
+  featuredProducts: Product[];
+  trendingProducts: Product[];
+  topSellers: Seller[];
+  recentProducts: Product[];
+  curatedMode: 'top-rated' | 'trending';
+  freshPage: number;
+  freshHasMore: boolean;
+  productsFallbackActive: boolean;
+  cachedAt: number;
+};
+
+let HOME_SNAPSHOT_CACHE: HomeSnapshot | null = null;
+
+const toHomePreviewUri = (rawUri: string): string => {
+  if (!rawUri || !/^https?:\/\//i.test(rawUri)) {
+    return rawUri;
+  }
+
+  if (!rawUri.includes('/storage/buckets/') || !rawUri.includes('/files/')) {
+    return rawUri;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUri);
+  } catch {
+    return rawUri;
+  }
+
+  if (!parsed.pathname.endsWith('/view') && !parsed.pathname.endsWith('/preview')) {
+    return rawUri;
+  }
+
+  parsed.pathname = parsed.pathname.replace(/\/(view|preview)$/i, '/preview');
+  parsed.searchParams.set('quality', '58');
+  parsed.searchParams.set('output', 'webp');
+  parsed.searchParams.set('width', '420');
+  return parsed.toString();
+};
+
+const dummySkeletons = [
+  { $id: 'sk-1' },
+  { $id: 'sk-2' },
+  { $id: 'sk-3' },
+  { $id: 'sk-4' },
+  { $id: 'sk-5' },
+  { $id: 'sk-6' },
+] as unknown as Product[];
+
+const dummySellerSkeletons = [
+  { $id: 'sks-1' },
+  { $id: 'sks-2' },
+  { $id: 'sks-3' },
+] as unknown as Seller[];
+
+const useSkeletonPulse = () => {
+  const pulseAnim = useRef(new Animated.Value(0.6)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0.6,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [pulseAnim]);
+
+  return pulseAnim;
+};
+
+const ProductCardSkeleton = ({ variant = 'default', width }: { variant?: 'default' | 'premium'; width?: any }) => {
+  const isPremium = variant === 'premium';
+  const cardWidth = width || (isPremium ? 200 : '49.2%');
+  const imageHeight = isPremium ? 136 : 128;
+  const pulseAnim = useSkeletonPulse();
+
+  return (
+    <Animated.View
+      style={[
+        styles.skeletonContainer,
+        isPremium && styles.skeletonPremiumContainer,
+        { width: cardWidth, opacity: pulseAnim },
+      ]}
+    >
+      <View style={[styles.skeletonImage, { height: imageHeight }]} />
+      <View style={styles.skeletonContent}>
+        <View style={styles.skeletonLineShort} />
+        <View style={styles.skeletonLineLong} />
+        <View style={styles.skeletonLineMedium} />
+      </View>
+    </Animated.View>
+  );
+};
+
+const SellerCardSkeleton = () => {
+  const pulseAnim = useSkeletonPulse();
+  return (
+    <Animated.View style={[styles.skeletonSellerContainer, { opacity: pulseAnim }]}>
+      <View style={styles.skeletonSellerImageWrap}>
+        <View style={styles.skeletonSellerImage} />
+      </View>
+      <View style={styles.skeletonSellerContent}>
+        <View style={styles.skeletonLineShort} />
+        <View style={styles.skeletonLineLong} />
+        <View style={styles.skeletonSellerFooter}>
+          <View style={styles.skeletonLineMedium} />
+          <View style={styles.skeletonLineTiny} />
+        </View>
+      </View>
+    </Animated.View>
+  );
+};
 
 const HomeScreen = ({ navigation }: any) => {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const isCompact = screenHeight < 760;
   const isLargeScreen = screenWidth >= BUYER_LAYOUT.railBreakpoint;
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const cacheUserKey = user?.$id || 'guest';
   const cartCount = useCartStore((s) => s.items.reduce((t, i) => t + i.quantity, 0));
   const [selectedRegion, setSelectedRegion] = useState(DEFAULT_REGION);
   const [autoRegionLabel, setAutoRegionLabel] = useState('');
@@ -59,6 +203,60 @@ const HomeScreen = ({ navigation }: any) => {
   const [startupRegionResolved, setStartupRegionResolved] = useState(Platform.OS === 'web');
   const contentRailStyle = isLargeScreen ? styles.contentRailWide : undefined;
   const initialLoadDoneRef = useRef(false);
+  const prefetchedUrisRef = useRef<Set<string>>(new Set());
+
+  const curatedModeRef = useRef(curatedMode);
+
+  useEffect(() => {
+    curatedModeRef.current = curatedMode;
+    if (HOME_SNAPSHOT_CACHE) {
+      HOME_SNAPSHOT_CACHE.curatedMode = curatedMode;
+    }
+  }, [curatedMode]);
+
+  useEffect(() => {
+    const initSnapshot = async () => {
+      let snapshot = HOME_SNAPSHOT_CACHE;
+
+      if (!snapshot) {
+        try {
+          const cached = await readHomeCache();
+          if (cached) {
+            snapshot = cached;
+            HOME_SNAPSHOT_CACHE = cached;
+          }
+        } catch (e) {
+          // File read failed
+        }
+      }
+
+      if (!snapshot) {
+        return;
+      }
+
+      const snapshotExpired = Date.now() - snapshot.cachedAt > HOME_SNAPSHOT_TTL_MS;
+      const wrongUser = snapshot.userId !== cacheUserKey;
+
+      if (snapshotExpired || wrongUser) {
+        return;
+      }
+
+      setSelectedRegion(snapshot.selectedRegion);
+      setAutoRegionLabel(snapshot.autoRegionLabel);
+      setFeaturedProducts(snapshot.featuredProducts);
+      setTrendingProducts(snapshot.trendingProducts);
+      setTopSellers(snapshot.topSellers);
+      setRecentProducts(snapshot.recentProducts);
+      setCuratedMode(snapshot.curatedMode);
+      setFreshPage(snapshot.freshPage);
+      setFreshHasMore(snapshot.freshHasMore);
+      setProductsFallbackActive(snapshot.productsFallbackActive);
+      initialLoadDoneRef.current = true;
+      setLoading(false);
+    };
+
+    initSnapshot();
+  }, [cacheUserKey]);
 
   const navigateToBuyerTab = useCallback(
     (tabName: string, params?: any) => {
@@ -99,10 +297,10 @@ const HomeScreen = ({ navigation }: any) => {
       const effectiveRegionFilter = selectedRegion === ALL_INDIA_REGION ? undefined : selectedRegion;
 
       const [featured, recent, sellers, trending] = await Promise.all([
-        getProducts({ sortBy: 'rating', region: effectiveRegionFilter }, 1, 6),
+        getProducts({ sortBy: 'rating', region: effectiveRegionFilter }, 1, CURATED_TOP_RATED_FETCH_SIZE),
         getProducts({ sortBy: 'newest', region: effectiveRegionFilter }, 1, FRESH_PAGE_SIZE),
-        effectiveRegionFilter ? getSellersByRegion(effectiveRegionFilter) : getTopVerifiedSellers(200),
-        getProducts({ sortBy: 'trending', region: effectiveRegionFilter }, 1, 8),
+        effectiveRegionFilter ? getSellersByRegion(effectiveRegionFilter) : getTopVerifiedSellers(12),
+        getProducts({ sortBy: 'trending', region: effectiveRegionFilter }, 1, CURATED_TRENDING_FETCH_SIZE),
       ]);
 
       const noRegionProducts =
@@ -111,28 +309,41 @@ const HomeScreen = ({ navigation }: any) => {
       const [featuredResolved, recentResolved, trendingResolved] =
         noRegionProducts
           ? await Promise.all([
-              getProducts({ sortBy: 'rating' }, 1, 6).catch(() => featured),
+              getProducts({ sortBy: 'rating' }, 1, CURATED_TOP_RATED_FETCH_SIZE).catch(() => featured),
               getProducts({ sortBy: 'newest' }, 1, FRESH_PAGE_SIZE).catch(() => recent),
-              getProducts({ sortBy: 'trending' }, 1, 8).catch(() => trending),
+              getProducts({ sortBy: 'trending' }, 1, CURATED_TRENDING_FETCH_SIZE).catch(() => trending),
             ])
           : [featured, recent, trending];
 
+      const rankedFeaturedProducts = rankProductsByBestRated(featuredResolved.data).slice(0, 4);
+      const rankedTrendingProducts = rankProductsByTrending(trendingResolved.data).slice(0, 4);
+      const rankedFreshProducts = rankProductsByFreshArrivals(recentResolved.data);
+      const rankedSellers = rankSellersForTopArtisans(sellers).slice(0, 4);
+
       setProductsFallbackActive(noRegionProducts);
-      setFeaturedProducts(featuredResolved.data);
-      setRecentProducts(recentResolved.data);
-      setTrendingProducts(trendingResolved.data.length ? trendingResolved.data : featuredResolved.data);
-      const rankedSellers = [...sellers].sort((a, b) => {
-        const aTop = isTopArtisan(a) ? 1 : 0;
-        const bTop = isTopArtisan(b) ? 1 : 0;
-        if (bTop !== aTop) {
-          return bTop - aTop;
-        }
-        return calculateTrustScore(b) - calculateTrustScore(a);
-      });
-      setTopSellers(rankedSellers.slice(0, 6));
+      setFeaturedProducts(rankedFeaturedProducts);
+      setRecentProducts(rankedFreshProducts);
+      setTrendingProducts(rankedTrendingProducts.length ? rankedTrendingProducts : rankedFeaturedProducts);
+      setTopSellers(rankedSellers);
       setFreshPage(1);
       setFreshHasMore(recentResolved.hasMore);
       initialLoadDoneRef.current = true;
+
+      HOME_SNAPSHOT_CACHE = {
+        userId: cacheUserKey,
+        selectedRegion,
+        autoRegionLabel,
+        featuredProducts: rankedFeaturedProducts,
+        trendingProducts: rankedTrendingProducts.length ? rankedTrendingProducts : rankedFeaturedProducts,
+        topSellers: rankedSellers,
+        recentProducts: rankedFreshProducts,
+        curatedMode: curatedModeRef.current,
+        freshPage: 1,
+        freshHasMore: recentResolved.hasMore,
+        productsFallbackActive: noRegionProducts,
+        cachedAt: Date.now(),
+      };
+      await writeHomeCache(HOME_SNAPSHOT_CACHE);
     } catch (err) {
       console.error('Error loading home data:', err);
       setProductsFallbackActive(false);
@@ -141,15 +352,62 @@ const HomeScreen = ({ navigation }: any) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedRegion]);
+  }, [autoRegionLabel, cacheUserKey, selectedRegion]);
 
   useEffect(() => {
-    if (!startupRegionResolved) {
+    if (!startupRegionResolved || authLoading) {
       return;
     }
 
     loadInitialData({ blocking: !initialLoadDoneRef.current });
-  }, [loadInitialData, startupRegionResolved]);
+  }, [loadInitialData, startupRegionResolved, authLoading]);
+
+  useEffect(() => {
+    const freshUris = recentProducts
+      .slice(0, HOME_PREFETCH_COUNT)
+      .map((product) => {
+        const imageList = normalizeImageList((product as any).images);
+        const raw = resolveImageUrl(appwriteConfig.productImagesBucketId, imageList[0]);
+        return toHomePreviewUri(raw);
+      })
+      .filter(Boolean);
+
+    const curatedSeed = (curatedMode === 'top-rated' ? featuredProducts : trendingProducts)
+      .slice(0, HOME_CURATED_PREFETCH_COUNT)
+      .map((product) => {
+        const imageList = normalizeImageList((product as any).images);
+        const raw = resolveImageUrl(appwriteConfig.productImagesBucketId, imageList[0]);
+        return toHomePreviewUri(raw);
+      })
+      .filter(Boolean);
+
+    const sellerUris = topSellers
+      .slice(0, HOME_SELLER_PREFETCH_COUNT)
+      .map((seller) => {
+        const docs = normalizeImageList((seller as any).verificationDocuments);
+        const raw = resolveImageUrl(appwriteConfig.documentsBucketId, docs[0]);
+        return toHomePreviewUri(raw);
+      })
+      .filter(Boolean);
+
+    const candidateUris = Array.from(new Set([...freshUris, ...curatedSeed, ...sellerUris]));
+
+    const newUris = candidateUris.filter((uri) => !prefetchedUrisRef.current.has(uri));
+
+    if (newUris.length === 0) {
+      return;
+    }
+
+    newUris.forEach((uri) => prefetchedUrisRef.current.add(uri));
+
+    const task = InteractionManager.runAfterInteractions(() => {
+      ExpoImage.prefetch(newUris, 'memory-disk').catch(() => {
+        // Prefetch is best-effort; ignore failures to keep feed responsive.
+      });
+    });
+
+    return () => task.cancel();
+  }, [curatedMode, featuredProducts, recentProducts, topSellers, trendingProducts]);
 
   useEffect(() => {
     let active = true;
@@ -163,9 +421,12 @@ const HomeScreen = ({ navigation }: any) => {
           return null;
         }
 
-        const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        let location = await Location.getLastKnownPositionAsync({});
+        if (!location) {
+          location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+        }
 
         const geo = await Location.reverseGeocodeAsync({
           latitude: location.coords.latitude,
@@ -225,6 +486,7 @@ const HomeScreen = ({ navigation }: any) => {
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
+    clearAllSellerCaches();
     loadInitialData({ blocking: false });
   }, [loadInitialData]);
 
@@ -254,7 +516,7 @@ const HomeScreen = ({ navigation }: any) => {
           }
         }
 
-        return merged;
+        return rankProductsByFreshArrivals(merged);
       });
 
       setFreshPage(nextPage);
@@ -267,12 +529,10 @@ const HomeScreen = ({ navigation }: any) => {
   }, [freshHasMore, freshPage, loading, loadingMore, productsFallbackActive, refreshing, selectedRegion]);
 
   const handleProductPress = useCallback((product: Product) => {
-    navigation.navigate('ProductDetail', { productId: product.$id });
+    navigation.navigate('ProductDetail', { productId: product.$id, initialProduct: product });
   }, [navigation]);
 
-  const handleCategoryPress = (categoryId: string) => {
-    openSearchWithParams({ category: categoryId, region: effectiveRegionFilter });
-  };
+
 
   const openSearchWithParams = useCallback(
     (params?: Record<string, any>) => {
@@ -338,16 +598,38 @@ const HomeScreen = ({ navigation }: any) => {
 
   const premiumStats = useMemo(
     () => [
-      { label: 'Featured items', value: `${uniqueFeaturedProductCount}` },
-      { label: 'Top artisans', value: `${topSellers.length}` },
+      { label: 'Featured items', value: loading && featuredProducts.length === 0 ? '...' : `${uniqueFeaturedProductCount}` },
+      { label: 'Top artisans', value: loading && topSellers.length === 0 ? '...' : `${topSellers.length}` },
       { label: 'Region', value: activeRegionLabel || 'All India' },
     ],
-    [activeRegionLabel, topSellers.length, uniqueFeaturedProductCount]
+    [activeRegionLabel, topSellers.length, uniqueFeaturedProductCount, loading, featuredProducts.length]
   );
 
   const renderFreshProductCard = useCallback(
-    (item: Product) => (
-      <View key={item.$id} style={styles.freshGridItem}>
+    ({ item }: { item: Product }) => (
+      <View style={styles.freshGridItem}>
+        <ProductCard
+          product={item}
+          performanceMode="list"
+          fullWidth
+          variant="default"
+          fallbackRegionLabel={activeRegionLabel}
+          onPress={() => handleProductPress(item)}
+        />
+      </View>
+    ),
+    [activeRegionLabel, handleProductPress]
+  );
+
+  const renderCuratedProductCard = useCallback(
+    ({ item }: { item: Product }) => (
+      <View
+        style={[
+          styles.horizontalCard,
+          isCompact && styles.horizontalCardCompact,
+          { width: featuredCardWidth },
+        ]}
+      >
         <ProductCard
           product={item}
           performanceMode="list"
@@ -358,12 +640,10 @@ const HomeScreen = ({ navigation }: any) => {
         />
       </View>
     ),
-    [activeRegionLabel, handleProductPress]
+    [activeRegionLabel, featuredCardWidth, handleProductPress, isCompact]
   );
 
-  if (loading && !refreshing) {
-    return <LoadingSpinner fullScreen />;
-  }
+
 
   if (error && !refreshing) {
     return (
@@ -381,15 +661,28 @@ const HomeScreen = ({ navigation }: any) => {
     <View style={styles.container}>
       <View style={styles.pageAura} pointerEvents="none" />
       <FlatList
-        data={[{ id: 'home-content' }]}
-        keyExtractor={(item) => item.id}
-        renderItem={() => null}
-        removeClippedSubviews
+        data={loading && recentProducts.length === 0 ? dummySkeletons : recentProducts}
+        keyExtractor={(item) => item.$id}
+        renderItem={({ item }) => {
+          if (item.$id.startsWith('sk-')) {
+            return (
+              <View style={styles.freshGridItem}>
+                <ProductCardSkeleton variant="default" width="100%" />
+              </View>
+            );
+          }
+          return renderFreshProductCard({ item });
+        }}
+        numColumns={2}
+        columnWrapperStyle={styles.freshGridRow}
+        removeClippedSubviews={Platform.OS === 'android'}
         initialNumToRender={2}
         maxToRenderPerBatch={2}
         windowSize={3}
-        updateCellsBatchingPeriod={80}
+        updateCellsBatchingPeriod={140}
         showsVerticalScrollIndicator={false}
+        onEndReached={loadMoreFreshProducts}
+        onEndReachedThreshold={0.2}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -399,43 +692,32 @@ const HomeScreen = ({ navigation }: any) => {
         }
         ListHeaderComponent={
           <>
-            <View
-              style={[
-                styles.banner,
-                isCompact && styles.bannerCompact,
-                contentRailStyle,
-              ]}
-            >
-              <View style={styles.heroGlowOne} pointerEvents="none" />
-              <View style={styles.heroGlowTwo} pointerEvents="none" />
-              <View style={styles.bannerContent}>
-                <Text style={styles.bannerEyebrow}>Explore Authentic Regions</Text>
-                <Text style={styles.bannerTitle}>
-                  Namaste{user?.name ? `, ${user.name.split(' ')[0]}` : ''}! 🙏
-                </Text>
-                <Text style={styles.bannerSubtitle}>
-                  Discover authentic regional crafts from verified local artisans
-                </Text>
-                <View style={styles.heroChipRow}>
-                  <View style={styles.heroChip}>
-                    <Ionicons name="shield-checkmark-outline" size={11} color={COLORS.secondaryDark} />
-                    <Text style={styles.heroChipText}>Verified Sellers</Text>
-                  </View>
-                  <View style={styles.heroChip}>
-                    <Ionicons name="card-outline" size={11} color={COLORS.primaryDark} />
-                    <Text style={styles.heroChipText}>Secure Checkout</Text>
+            {/* Premium Header Bar */}
+            <View style={[styles.appHeaderRow, contentRailStyle]}>
+              <TouchableOpacity
+                style={styles.locationSelector}
+                onPress={() => setRegionPickerVisible(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="location-sharp" size={18} color={COLORS.primary} />
+                <View style={styles.locationTextWrap}>
+                  <Text style={styles.locationLabel}>Region Feed</Text>
+                  <View style={styles.locationValueRow}>
+                    <Text style={styles.locationValue}>{activeRegionLabel || 'All India'}</Text>
+                    <Ionicons name="chevron-down" size={12} color={COLORS.primary} />
                   </View>
                 </View>
-                {!!autoRegionLabel && <Text style={styles.bannerRegionHint}>Home feed region: {autoRegionLabel}</Text>}
-              </View>
+              </TouchableOpacity>
+
               <TouchableOpacity
-                style={styles.cartButton}
+                style={styles.cartButtonHeader}
                 onPress={() => navigation.navigate('Cart')}
+                activeOpacity={0.8}
               >
-                <Ionicons name="cart-outline" size={26} color={COLORS.primary} />
+                <Ionicons name="cart" size={22} color={COLORS.text} />
                 {cartCount > 0 && (
-                  <View style={styles.cartBadge}>
-                    <Text style={styles.cartBadgeText}>
+                  <View style={styles.cartBadgeHeader}>
+                    <Text style={styles.cartBadgeTextHeader}>
                       {cartCount > 9 ? '9+' : cartCount}
                     </Text>
                   </View>
@@ -443,133 +725,64 @@ const HomeScreen = ({ navigation }: any) => {
               </TouchableOpacity>
             </View>
 
-            <View style={[styles.platformTrustBanner, contentRailStyle]}>
-              <View style={styles.platformTrustIconWrap}>
-                <Ionicons name="shield-checkmark" size={18} color={COLORS.secondaryDark} />
-              </View>
-              <View style={styles.platformTrustContent}>
-                <Text style={styles.platformTrustTitle}>GramBazaar Trust Promise</Text>
-                <Text style={styles.platformTrustText}>
-                  Discover verified artisans, transparent trust scores, and safer ordering with in-app support.
-                </Text>
-              </View>
+            {/* Welcome Greeting Hero */}
+            <View style={[styles.welcomeHero, contentRailStyle]}>
+              <Text style={styles.welcomeTitle}>
+                Namaste{user?.name ? `, ${user.name.split(' ')[0]}` : ''}! 🙏
+              </Text>
+              <Text style={styles.welcomeSubtitle}>
+                Discover India's heritage, direct to your doorstep.
+              </Text>
             </View>
 
-            <View style={[styles.metricsPanel, contentRailStyle]}>
-              {premiumStats.map((metric) => {
-                const isRegionMetric = metric.label === 'Region';
-                if (isRegionMetric) {
-                  return (
-                    <TouchableOpacity
-                      key={metric.label}
-                      style={[styles.metricCard, styles.metricCardAction]}
-                      activeOpacity={0.82}
-                      onPress={() => setRegionPickerVisible(true)}
-                    >
-                      <Text style={styles.metricLabel}>{metric.label}</Text>
-                      <View style={styles.metricValueRow}>
-                        <Text style={[styles.metricValue, styles.metricValueRegion]} numberOfLines={1}>
-                          {metric.value}
-                        </Text>
-                        <Ionicons name="chevron-down" size={14} color={COLORS.primary} />
-                      </View>
-                    </TouchableOpacity>
-                  );
-                }
+            {/* Visual USP Highlights Grid */}
+            <View style={[styles.uspGrid, contentRailStyle]}>
+              <View style={styles.uspCard}>
+                <View style={[styles.uspIconWrap, { backgroundColor: '#FFEBE0' }]}>
+                  <Ionicons name="location" size={16} color="#E04F00" />
+                </View>
+                <Text style={styles.uspTitle}>Local Origin</Text>
+                <Text style={styles.uspDesc}>Region Search</Text>
+              </View>
 
-                return (
-                  <View key={metric.label} style={styles.metricCard}>
-                    <Text style={styles.metricLabel}>{metric.label}</Text>
-                    <Text style={styles.metricValue} numberOfLines={1}>
-                      {metric.value}
-                    </Text>
-                  </View>
-                );
-              })}
+              <View style={styles.uspCard}>
+                <View style={[styles.uspIconWrap, { backgroundColor: '#F0E5FF' }]}>
+                  <Ionicons name="sparkles" size={16} color="#8522E0" />
+                </View>
+                <Text style={styles.uspTitle}>Unique Art</Text>
+                <Text style={styles.uspDesc}>Rare Crafts</Text>
+              </View>
+
+              <View style={styles.uspCard}>
+                <View style={[styles.uspIconWrap, { backgroundColor: '#E2FBE9' }]}>
+                  <Ionicons name="shield-checkmark" size={16} color="#118030" />
+                </View>
+                <Text style={styles.uspTitle}>Artisan Trust</Text>
+                <Text style={styles.uspDesc}>Safer Orders</Text>
+              </View>
             </View>
 
             {!user && (
-              <View style={[styles.guestCtaCard, contentRailStyle]}>
-                <View style={styles.guestCtaTextWrap}>
-                  <Text style={styles.guestCtaTitle}>Browse as Guest</Text>
-                  <Text style={styles.guestCtaSubtitle}>
-                    Login to place orders, save products, and get notifications.
-                  </Text>
+              <View style={[styles.guestMiniCard, contentRailStyle]}>
+                <Ionicons name="person-add-outline" size={18} color={COLORS.primary} style={{ marginRight: 2 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.guestMiniTitle}>Join GramBazaar</Text>
+                  <Text style={styles.guestMiniSubtitle}>Unlock checkout & orders</Text>
                 </View>
-                <View style={styles.guestCtaActions}>
-                  <TouchableOpacity style={styles.guestSecondaryBtn} onPress={() => navigateToAuth('Login')}>
-                    <Text style={styles.guestSecondaryText}>Login</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.guestPrimaryBtn} onPress={() => navigateToAuth('Register')}>
-                    <Text style={styles.guestPrimaryText}>Register</Text>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity style={styles.guestMiniBtn} onPress={() => navigateToAuth('Login')}>
+                  <Text style={styles.guestMiniBtnText}>Sign In</Text>
+                </TouchableOpacity>
               </View>
             )}
 
-            <View>
-              <TouchableOpacity
-                style={[styles.searchBar, isCompact && styles.searchBarCompact, contentRailStyle]}
-                onPress={() => openSearchWithParams()}
-                activeOpacity={0.7}
-              >
-                <View style={styles.searchIconWrap}>
-                  <Ionicons name="search" size={17} color={COLORS.primaryDark} />
-                </View>
-                <Text style={styles.searchPlaceholder}>Search by product, shop, village or place...</Text>
-                <Ionicons name="arrow-forward-circle" size={24} color={COLORS.primary} />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.regionActionButton, contentRailStyle]}
-                onPress={() =>
-                  navigateToBuyerTab('Explore', {
-                    screen: 'ExploreMain',
-                  })
-                }
-                activeOpacity={0.82}
-              >
-                <View style={styles.regionActionLeft}>
-                  <Ionicons name="navigate-outline" size={16} color={COLORS.primaryDark} />
-                  <Text style={styles.regionActionText}>Refine by region, district and village</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={COLORS.primary} />
-              </TouchableOpacity>
-
-              {productsFallbackActive && (
-                <View style={[styles.fallbackNoticeBar, contentRailStyle]}>
-                  <Ionicons name="information-circle-outline" size={15} color={COLORS.primaryDark} />
-                  <Text style={styles.fallbackNoticeText}>{fallbackNoticeText}</Text>
-                </View>
-              )}
-            </View>
-
-            <View style={[styles.sectionPanel, isCompact && styles.sectionCompact, contentRailStyle]}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionHeadingWrap}>
-                  <Text style={styles.sectionTitle}>Shop by Category</Text>
-                  <Text style={styles.sectionCaption}>Explore craft lanes by product type</Text>
-                </View>
+            {productsFallbackActive && (
+              <View style={[styles.fallbackNoticeBar, contentRailStyle]}>
+                <Ionicons name="information-circle-outline" size={15} color={COLORS.primaryDark} />
+                <Text style={styles.fallbackNoticeText}>{fallbackNoticeText}</Text>
               </View>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.categoriesRow}
-              >
-                {CATEGORIES.slice(0, 8).map((cat) => (
-                  <TouchableOpacity
-                    key={cat.id}
-                    style={styles.categoryChip}
-                    onPress={() => handleCategoryPress(cat.id)}
-                  >
-                    <Text style={styles.categoryIcon}>{cat.icon}</Text>
-                    <Text style={styles.categoryName} numberOfLines={1}>
-                      {cat.name.split(' ')[0]}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
+            )}
+
+
 
             {curatedProducts.length > 0 && (
               <View style={[styles.sectionPanel, isCompact && styles.sectionCompact, contentRailStyle]}>
@@ -610,31 +823,28 @@ const HomeScreen = ({ navigation }: any) => {
                   </TouchableOpacity>
                 </View>
 
-                <ScrollView
+                <FlatList
                   horizontal
+                  data={loading && curatedProducts.length === 0 ? dummySkeletons.slice(0, 3) : curatedProducts}
+                  keyExtractor={(item) => item.$id}
                   showsHorizontalScrollIndicator={false}
+                  removeClippedSubviews={Platform.OS === 'android'}
+                  initialNumToRender={2}
+                  maxToRenderPerBatch={2}
+                  windowSize={3}
+                  updateCellsBatchingPeriod={120}
                   contentContainerStyle={styles.horizontalList}
-                >
-                  {curatedProducts.map((item) => (
-                    <View
-                      key={item.$id}
-                      style={[
-                        styles.horizontalCard,
-                        isCompact && styles.horizontalCardCompact,
-                        { width: featuredCardWidth },
-                      ]}
-                    >
-                      <ProductCard
-                        product={item}
-                        performanceMode="list"
-                        fullWidth
-                        variant="premium"
-                        fallbackRegionLabel={activeRegionLabel}
-                        onPress={() => handleProductPress(item)}
-                      />
-                    </View>
-                  ))}
-                </ScrollView>
+                  renderItem={({ item }) => {
+                    if (item.$id.startsWith('sk-')) {
+                      return (
+                        <View style={[styles.horizontalCard, { width: featuredCardWidth }]}>
+                          <ProductCardSkeleton variant="premium" width={featuredCardWidth} />
+                        </View>
+                      );
+                    }
+                    return renderCuratedProductCard({ item });
+                  }}
+                />
               </View>
             )}
 
@@ -656,7 +866,11 @@ const HomeScreen = ({ navigation }: any) => {
                 </TouchableOpacity>
               </View>
 
-              {topSellers.length > 0 ? (
+              {loading && topSellers.length === 0 ? (
+                dummySellerSkeletons.map((seller) => (
+                  <SellerCardSkeleton key={seller.$id} />
+                ))
+              ) : topSellers.length > 0 ? (
                 topSellers.slice(0, 4).map((seller) => (
                   <SellerCard
                     key={seller.$id}
@@ -709,42 +923,34 @@ const HomeScreen = ({ navigation }: any) => {
                   <Text style={styles.seeAll}>See All</Text>
                 </TouchableOpacity>
               </View>
-
-              {recentProducts.length > 0 ? (
-                <>
-                  <View style={styles.freshGridWrap}>{recentProducts.map(renderFreshProductCard)}</View>
-                  {loadingMore ? (
-                    <View style={styles.loadMoreFooter}>
-                      <ActivityIndicator size="small" color={COLORS.primary} />
-                    </View>
-                  ) : freshHasMore ? (
-                    <TouchableOpacity style={styles.freshLoadMoreButton} onPress={loadMoreFreshProducts}>
-                      <Text style={styles.freshLoadMoreText}>Load More</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </>
-              ) : (
-                <View style={styles.freshEmptyWrap}>
-                  <Ionicons name="leaf-outline" size={28} color={COLORS.textTertiary} />
-                  <Text style={styles.emptySubtext}>No fresh products available yet.</Text>
-                </View>
-              )}
             </View>
           </>
         }
         ListEmptyComponent={
-          <View style={[styles.emptySection, contentRailStyle]}>
-            <Ionicons name="leaf-outline" size={48} color={COLORS.textTertiary} />
-            <Text style={styles.emptyText}>No products available yet</Text>
-            <Text style={styles.emptySubtext}>
-              Check back soon for fresh artisan products
-            </Text>
+          <View style={[styles.sectionPanel, isCompact && styles.sectionCompact, contentRailStyle]}>
+            <View style={styles.freshEmptyWrap}>
+              <Ionicons name="leaf-outline" size={28} color={COLORS.textTertiary} />
+              <Text style={styles.emptySubtext}>No fresh products available yet.</Text>
+            </View>
           </View>
+        }
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={styles.loadMoreFooter}>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            </View>
+          ) : freshHasMore ? (
+            <TouchableOpacity style={styles.freshLoadMoreButton} onPress={loadMoreFreshProducts}>
+              <Text style={styles.freshLoadMoreText}>Load More</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.freshListBottomSpace} />
+          )
         }
         contentContainerStyle={[
           styles.listContent,
           isLargeScreen && styles.listContentWide,
-          { paddingBottom: 0 },
+          { paddingBottom: 12 },
         ]}
       />
 
@@ -1316,11 +1522,12 @@ const styles = StyleSheet.create({
   horizontalCardCompact: {
     width: 1,
   },
-  freshGridWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+  freshGridList: {
     marginTop: 2,
+  },
+  freshGridRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   freshGridItem: {
     width: '49.2%',
@@ -1356,6 +1563,9 @@ const styles = StyleSheet.create({
   },
   loadMoreFooter: {
     paddingVertical: 12,
+  },
+  freshListBottomSpace: {
+    height: 6,
   },
   listContent: {
     paddingHorizontal: 8,
@@ -1453,6 +1663,248 @@ const styles = StyleSheet.create({
   },
   regionModalItemTextSelected: {
     color: COLORS.primary,
+  },
+  // Skeletons
+  skeletonContainer: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    overflow: 'hidden',
+  },
+  skeletonPremiumContainer: {
+    borderRadius: 18,
+    borderColor: `${COLORS.primary}20`,
+  },
+  skeletonImage: {
+    width: '100%',
+    backgroundColor: COLORS.card,
+  },
+  skeletonContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  skeletonLineShort: {
+    width: '40%',
+    height: 12,
+    backgroundColor: COLORS.border,
+    borderRadius: 6,
+  },
+  skeletonLineMedium: {
+    width: '70%',
+    height: 12,
+    backgroundColor: COLORS.border,
+    borderRadius: 6,
+  },
+  skeletonLineLong: {
+    width: '90%',
+    height: 14,
+    backgroundColor: COLORS.border,
+    borderRadius: 7,
+  },
+  skeletonLineTiny: {
+    width: '20%',
+    height: 12,
+    backgroundColor: COLORS.border,
+    borderRadius: 6,
+  },
+  skeletonSellerContainer: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    flexDirection: 'row',
+    overflow: 'hidden',
+    height: 136,
+  },
+  skeletonSellerImageWrap: {
+    width: 110,
+    height: 136,
+    padding: 7,
+    backgroundColor: COLORS.card,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  skeletonSellerImage: {
+    width: 96,
+    height: 120,
+    backgroundColor: COLORS.border,
+    borderRadius: 11,
+  },
+  skeletonSellerContent: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    justifyContent: 'space-between',
+  },
+  skeletonSellerFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  // USP highlight infographics
+  uspGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 12,
+  },
+  uspCard: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 10,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  uspIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  uspTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  uspDesc: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  // Guest mini card
+  guestMiniCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.primary}10`,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: `${COLORS.primary}30`,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 10,
+    gap: 8,
+  },
+  guestMiniTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+  },
+  guestMiniSubtitle: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginTop: 1,
+  },
+  guestMiniBtn: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  guestMiniBtnText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  // Header Location Bar & Welcome Hero
+  appHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  locationSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  locationTextWrap: {
+    flexDirection: 'column',
+  },
+  locationLabel: {
+    fontSize: 9,
+    color: COLORS.textTertiary,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  locationValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 1,
+  },
+  locationValue: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  cartButtonHeader: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  cartBadgeHeader: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: COLORS.error,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  cartBadgeTextHeader: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  welcomeHero: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  welcomeTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: COLORS.text,
+    letterSpacing: -0.3,
+  },
+  welcomeSubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    fontWeight: '600',
   },
 });
 

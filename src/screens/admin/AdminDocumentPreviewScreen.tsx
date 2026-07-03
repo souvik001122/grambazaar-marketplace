@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { WebView } from 'react-native-webview';
 import { COLORS } from '../../constants/colors';
+import { PremiumImage } from '../../components/PremiumImage';
 
 type RouteParams = {
   url?: string;
@@ -54,7 +55,12 @@ const AdminDocumentViewerScreen = ({ route, navigation }: any) => {
 
       {type === 'image' ? (
         <ScrollView contentContainerStyle={styles.imageWrap}>
-          <Image source={{ uri: docUrl }} style={styles.imagePreview} resizeMode="contain" />
+          <PremiumImage
+            uri={docUrl}
+            style={styles.imagePreview}
+            resizeMode="contain"
+            variant="document"
+          />
         </ScrollView>
       ) : (
         <WebView

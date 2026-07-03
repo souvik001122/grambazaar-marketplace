@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Linking,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -506,6 +507,10 @@ const AdminReportsScreen = ({ navigation }: any) => {
         keyExtractor={(item) => item.$id}
         contentContainerStyle={[styles.listContent, { paddingBottom: tabBarHeight }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />}
+        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={10}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="flag-outline" size={60} color={COLORS.textTertiary} />

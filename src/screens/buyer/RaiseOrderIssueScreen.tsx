@@ -19,6 +19,7 @@ import { uploadFile } from '../../services/storageService';
 import { createOrderDisputeReport } from '../../services/adminService';
 import { useAuth } from '../../context/AuthContext';
 import { formatDateTime } from '../../utils/formatting';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 const ISSUE_CATEGORIES = [
   'Not Delivered',
@@ -142,9 +143,16 @@ const RaiseOrderIssueScreen = ({ route, navigation }: any) => {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Raise Delivery Issue</Text>
-      <Text style={styles.subtitle}>Order #{order.$id.slice(-8).toUpperCase()}</Text>
+    <View style={styles.container}>
+      <PremiumTopBar
+        title="Raise Delivery Issue"
+        subtitle={`Order #${order.$id.slice(-8).toUpperCase()}`}
+        icon="flag-outline"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+      />
+
+      <ScrollView contentContainerStyle={styles.content}>
 
       {readOnly && (
         <>
@@ -244,7 +252,8 @@ const RaiseOrderIssueScreen = ({ route, navigation }: any) => {
           <Text style={styles.readOnlyHintText}>This issue is already submitted. Admin will update status after review.</Text>
         </View>
       )}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 };
 

@@ -1,14 +1,16 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
   TextInput,
   BackHandler,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -25,6 +27,7 @@ import { COLORS } from '../../constants/colors';
 import { showAlert } from '../../utils/alert';
 import { useFocusEffect } from '@react-navigation/native';
 import { formatRelativeTime } from '../../utils/formatting';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
  
 
 type CourierName = 'India Post' | 'DTDC' | 'Blue Dart' | 'Delhivery' | 'Other';
@@ -99,7 +102,7 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
         return next;
       });
 
-      const notifications = await getUserNotifications(user.$id, 1, 100);
+      const notifications = await getUserNotifications(user.$id, 1, 30);
       const paymentEvents: Record<string, { message: string; createdAt: string }> = {};
       notifications.data.forEach((n) => {
         const msg = (n.message || '').toLowerCase();
@@ -162,14 +165,14 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     setRefreshing(false);
   }, [loadOrders]);
 
-  const isPaid = (order: Order) => {
+  const isPaid = useCallback((order: Order) => {
     const payment = (order.paymentStatus || '').toLowerCase();
     const status = (order.status || '').toLowerCase();
     if (status === 'shipped' || status === 'delivered') return true;
     return payment === 'paid';
-  };
+  }, []);
 
-  const updateOrderStatus = async (orderId: string, newStatus: string) => {
+  const updateOrderStatus = useCallback(async (orderId: string, newStatus: string) => {
     try {
       await updateOrder(orderId, newStatus);
       showAlert('Success', `Order marked as ${newStatus}`);
@@ -177,9 +180,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     } catch (error: any) {
       showAlert('Error', error?.message || 'Failed to update order status');
     }
-  };
+  }, [loadOrders]);
 
-  const confirmPayment = async (orderId: string) => {
+  const confirmPayment = useCallback(async (orderId: string) => {
     try {
       await updateOrderPaymentStatus(orderId, 'paid');
       showAlert('Success', 'Payment confirmed as paid');
@@ -187,9 +190,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     } catch (error: any) {
       showAlert('Error', error?.message || 'Failed to confirm payment');
     }
-  };
+  }, [loadOrders]);
 
-  const notifyPaymentNotReceived = async (orderId: string) => {
+  const notifyPaymentNotReceived = useCallback(async (orderId: string) => {
     try {
       await notifyBuyerPaymentPending(orderId);
       showAlert('Reminder Sent', 'Buyer has been notified to complete payment.');
@@ -197,17 +200,17 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     } catch (error: any) {
       showAlert('Error', error?.message || 'Failed to notify buyer');
     }
-  };
+  }, [loadOrders]);
 
-  const handleTrackingChange = (orderId: string, value: string) => {
+  const handleTrackingChange = useCallback((orderId: string, value: string) => {
     setTrackingInputs((prev) => ({ ...prev, [orderId]: value }));
-  };
+  }, []);
 
-  const handleCourierChange = (orderId: string, courier: CourierName) => {
+  const handleCourierChange = useCallback((orderId: string, courier: CourierName) => {
     setCourierInputs((prev) => ({ ...prev, [orderId]: courier }));
-  };
+  }, []);
 
-  const handleStatusChange = (order: Order) => {
+  const handleStatusChange = useCallback((order: Order) => {
     const status = (order.status || '').toLowerCase();
 
     if (status === 'pending') {
@@ -258,9 +261,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
         { text: 'Confirm', onPress: () => updateOrderStatus(order.$id, 'delivered') },
       ]);
     }
-  };
+  }, [confirmPayment, courierInputs, isPaid, loadOrders, trackingInputs, updateOrderStatus]);
 
-  const handleCancelOrder = (order: Order) => {
+  const handleCancelOrder = useCallback((order: Order) => {
     const paid = isPaid(order);
     const title = paid ? 'Cancel & Refund?' : 'Cancel Order?';
     const message = paid
@@ -271,9 +274,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
       { text: 'No', style: 'cancel' },
       { text: 'Yes, Cancel', style: 'destructive', onPress: () => updateOrderStatus(order.$id, 'cancelled') },
     ]);
-  };
+  }, [isPaid, updateOrderStatus]);
 
-  const parseItems = (rawItems: any[] | string) => {
+  const parseItems = useCallback((rawItems: any[] | string) => {
     try {
       if (Array.isArray(rawItems)) return rawItems;
       if (typeof rawItems === 'string') return JSON.parse(rawItems);
@@ -281,9 +284,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
     } catch {
       return [];
     }
-  };
+  }, []);
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = useCallback((status: string) => {
     switch ((status || '').toLowerCase()) {
       case 'pending': return '#FFA500';
       case 'processing': return '#2196F3';
@@ -293,9 +296,9 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
       case 'refunded': return '#FF9800';
       default: return '#999';
     }
-  };
+  }, []);
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = useCallback((status: string) => {
     switch ((status || '').toLowerCase()) {
       case 'pending': return 'time-outline';
       case 'processing': return 'construct-outline';
@@ -304,18 +307,18 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
       case 'cancelled': return 'close-circle-outline';
       default: return 'help-circle-outline';
     }
-  };
+  }, []);
 
-  const getNextAction = (status: string): string | null => {
+  const getNextAction = useCallback((status: string): string | null => {
     switch ((status || '').toLowerCase()) {
       case 'pending': return 'Accept Order';
       case 'processing': return 'Mark Shipped';
       case 'shipped': return 'Confirm Delivered';
       default: return null;
     }
-  };
+  }, []);
 
-  const getPaymentMeta = (order: Order) => {
+  const getPaymentMeta = useCallback((order: Order) => {
     const payment = (order.paymentStatus || '').toLowerCase();
     const status = (order.status || '').toLowerCase();
 
@@ -324,13 +327,32 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
       return { label: 'Paid', color: '#4CAF50', icon: 'checkmark-circle' as const };
     }
     return { label: 'Pending', color: '#FFA500', icon: 'time' as const };
-  };
+  }, []);
 
-  const filteredOrders = activeTab === 'all'
-    ? orders
-    : orders.filter((o) => (o.status || '').toLowerCase() === activeTab);
+  const filteredOrders = useMemo(
+    () => (activeTab === 'all' ? orders : orders.filter((o) => (o.status || '').toLowerCase() === activeTab)),
+    [activeTab, orders]
+  );
 
-  const renderOrder = ({ item }: { item: Order }) => {
+  const tabCounts = useMemo(() => {
+    const counts: Record<TabKey, number> = {
+      all: orders.length,
+      pending: 0,
+      processing: 0,
+      shipped: 0,
+      delivered: 0,
+      cancelled: 0,
+    };
+
+    orders.forEach((order) => {
+      const key = (order.status || '').toLowerCase() as TabKey;
+      if (key in counts && key !== 'all') counts[key] += 1;
+    });
+
+    return counts;
+  }, [orders]);
+
+  const renderOrder = useCallback(({ item }: { item: Order }) => {
     const items = parseItems(item.items);
     const paymentDone = isPaid(item);
     const paymentMeta = getPaymentMeta(item);
@@ -460,7 +482,23 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
         </View>
       </View>
     );
-  };
+  }, [
+    buyerPaymentEvents,
+    confirmPayment,
+    courierInputs,
+    getNextAction,
+    getPaymentMeta,
+    getStatusColor,
+    getStatusIcon,
+    handleCancelOrder,
+    handleCourierChange,
+    handleStatusChange,
+    handleTrackingChange,
+    isPaid,
+    notifyPaymentNotReceived,
+    parseItems,
+    trackingInputs,
+  ]);
 
   if (loading) {
     return (
@@ -472,40 +510,56 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
 
   return (
     <View style={styles.container}>
-      <FlatList
-        horizontal
-        data={TABS}
-        keyExtractor={(item) => item.key}
-        showsHorizontalScrollIndicator={false}
-        bounces={false}
-        style={styles.tabsContainer}
-        contentContainerStyle={styles.tabsContent}
-        renderItem={({ item }) => {
-          const count = item.key === 'all'
-            ? orders.length
-            : orders.filter((o) => (o.status || '').toLowerCase() === item.key).length;
-          return (
-            <TouchableOpacity
-              style={[styles.tab, activeTab === item.key && styles.activeTab]}
-              onPress={() => setActiveTab(item.key)}
-            >
-              <Text style={[styles.tabText, activeTab === item.key && styles.activeTabText]} numberOfLines={1}>
-                {item.label}
-              </Text>
-              {count > 0 && (
-                <View style={[styles.tabBadge, activeTab === item.key && styles.activeTabBadge]}>
-                  <Text style={[styles.tabBadgeText, activeTab === item.key && styles.activeTabBadgeText]}>{count}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        }}
+      <PremiumTopBar
+        title="Orders"
+        subtitle="Process payments, shipping, and delivery updates"
+        icon="receipt-outline"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={onRefresh}
+        rightDisabled={refreshing}
       />
+
+      <View style={styles.tabsContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          bounces={false}
+          contentContainerStyle={styles.tabsContent}
+        >
+          {TABS.map((item) => {
+            const count = tabCounts[item.key];
+            const isActive = activeTab === item.key;
+
+            return (
+              <TouchableOpacity
+                key={item.key}
+                style={[styles.tab, isActive && styles.activeTab]}
+                onPress={() => setActiveTab(item.key)}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.tabText, isActive && styles.activeTabText]} numberOfLines={1}>
+                  {item.label}
+                </Text>
+                <View style={[styles.tabBadge, isActive && styles.activeTabBadge]}>
+                  <Text style={[styles.tabBadgeText, isActive && styles.activeTabBadgeText]}>{count}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       <FlatList
         data={filteredOrders}
         keyExtractor={(item) => item.$id}
         renderItem={renderOrder}
+        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        updateCellsBatchingPeriod={90}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={[styles.listContent, { paddingBottom: 16 }]}
         ListEmptyComponent={() => (
@@ -523,93 +577,110 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: COLORS.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  tabsContainer: { maxHeight: 52, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
+  tabsContainer: {
+    height: 58,
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    justifyContent: 'center',
+  },
   tabsContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     alignItems: 'center',
   },
   tab: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 36,
+    height: 40,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginHorizontal: 4,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
+    paddingVertical: 0,
+    marginRight: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
   },
-  activeTab: { backgroundColor: COLORS.primary },
-  tabText: { fontSize: 13, fontWeight: '500', color: '#666' },
-  activeTabText: { color: '#fff' },
+  activeTab: { backgroundColor: `${COLORS.primary}16`, borderColor: `${COLORS.primary}55` },
+  tabText: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary },
+  activeTabText: { color: COLORS.primary },
   tabBadge: {
     marginLeft: 6,
-    backgroundColor: '#ddd',
-    borderRadius: 10,
+    backgroundColor: '#E7E5E4',
+    borderRadius: 999,
+    height: 20,
     paddingHorizontal: 6,
-    paddingVertical: 1,
     minWidth: 20,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  activeTabBadge: { backgroundColor: 'rgba(255,255,255,0.3)' },
-  tabBadgeText: { fontSize: 11, fontWeight: '600', color: '#666' },
+  activeTabBadge: { backgroundColor: COLORS.primary },
+  tabBadgeText: { fontSize: 11, fontWeight: '700', color: COLORS.textSecondary },
   activeTabBadgeText: { color: '#fff' },
   listContent: { padding: 16 },
   orderCard: {
-    backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08,
-    shadowRadius: 4, elevation: 3,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 15,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   orderHeader: { marginBottom: 12 },
   orderIdRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  orderId: { fontSize: 15, fontWeight: '700', color: '#333' },
+  orderId: { fontSize: 15, fontWeight: '800', color: COLORS.text },
   statusBadge: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10,
     paddingVertical: 4, borderRadius: 12, gap: 4,
   },
-  statusText: { fontSize: 12, fontWeight: '600' },
-  orderDate: { fontSize: 12, color: '#999', marginTop: 4 },
+  statusText: { fontSize: 12, fontWeight: '700' },
+  orderDate: { fontSize: 11, color: COLORS.textTertiary, marginTop: 4 },
   itemsContainer: {
-    borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#f0f0f0',
+    borderTopWidth: 1, borderBottomWidth: 1, borderColor: COLORS.border,
     paddingVertical: 8, marginBottom: 12,
   },
   itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
-  itemName: { flex: 1, fontSize: 14, color: '#333' },
-  itemQty: { fontSize: 13, color: '#999', marginHorizontal: 12 },
-  itemPrice: { fontSize: 14, fontWeight: '600', color: '#333' },
-  noItems: { fontSize: 13, color: '#999', fontStyle: 'italic' },
+  itemName: { flex: 1, fontSize: 13, color: COLORS.text, fontWeight: '600' },
+  itemQty: { fontSize: 12, color: COLORS.textSecondary, marginHorizontal: 12 },
+  itemPrice: { fontSize: 13, fontWeight: '700', color: COLORS.text },
+  noItems: { fontSize: 12, color: COLORS.textSecondary, fontStyle: 'italic' },
   orderFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  totalLabel: { fontSize: 12, color: '#999' },
-  totalAmount: { fontSize: 18, fontWeight: '700', color: '#333' },
+  totalLabel: { fontSize: 11, color: COLORS.textSecondary },
+  totalAmount: { fontSize: 17, fontWeight: '800', color: COLORS.text },
   paymentBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   paymentText: { fontSize: 12, fontWeight: '600' },
   addressRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12, gap: 6 },
-  addressText: { flex: 1, fontSize: 12, color: '#999' },
+  addressText: { flex: 1, fontSize: 12, color: COLORS.textSecondary },
   trackingBox: { marginBottom: 12 },
-  trackingLabel: { fontSize: 12, fontWeight: '600', color: '#666', marginBottom: 6 },
+  trackingLabel: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 6 },
   courierRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
   courierChip: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: COLORS.border,
     borderRadius: 16,
     paddingVertical: 6,
     paddingHorizontal: 10,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: COLORS.card,
   },
   courierChipActive: { borderColor: COLORS.primary, backgroundColor: `${COLORS.primary}12` },
-  courierChipText: { fontSize: 12, color: '#475569', fontWeight: '600' },
+  courierChipText: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '700' },
   courierChipTextActive: { color: COLORS.primary },
   trackingInput: {
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
+    borderColor: COLORS.border,
+    borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 13,
-    color: '#333',
-    backgroundColor: '#fafafa',
+    color: COLORS.text,
+    backgroundColor: COLORS.card,
   },
   infoPill: {
     flexDirection: 'row',
@@ -661,8 +732,8 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: { color: '#C53030', fontSize: 13, fontWeight: '600', textAlign: 'center' },
   emptyContainer: { alignItems: 'center', paddingTop: 80 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#333', marginTop: 16 },
-  emptySubtext: { fontSize: 14, color: '#999', marginTop: 4 },
+  emptyTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginTop: 16 },
+  emptySubtext: { fontSize: 13, color: COLORS.textSecondary, marginTop: 4 },
 });
 
 export default SellerOrdersScreen;

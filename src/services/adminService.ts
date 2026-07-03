@@ -3,7 +3,7 @@ import { databases, appwriteConfig } from '../config/appwrite';
 import { AdminLog, Report, CreateReportDTO } from '../types/common.types';
 import { sendNotification } from './notificationService';
 import { getUsersByRole } from './userService';
-import { getSellerById } from './sellerService';
+import { getSellerById, invalidateSellerCache } from './sellerService';
 
 const DISPUTE_META_PREFIX = '[GBZ_DISPUTE_META]';
 
@@ -612,6 +612,7 @@ export const blockSeller = async (sellerId: string, blocked: boolean, adminId: s
         updatedAt: new Date().toISOString(),
       }
     );
+    invalidateSellerCache(sellerId);
     await createAdminLog(adminId, blocked ? 'block_seller' : 'unblock_seller', 'seller', sellerId);
   } catch (error) {
     console.error('Error blocking/unblocking seller:', error);

@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Image,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -15,6 +15,10 @@ import { getAllProducts, createAdminLog, adminDeleteProduct } from '../../servic
 import { approveProduct, toggleFeatured } from '../../services/productService';
 import { Product } from '../../types/product.types';
 import { COLORS } from '../../constants/colors';
+import { appwriteConfig } from '../../config/appwrite';
+import { normalizeImageList, resolveImageUrl } from '../../services/storageService';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
+import { PremiumImage } from '../../components/PremiumImage';
 import { showAlert } from '../../utils/alert';
 
 type FilterTab = 'pending' | 'active' | 'rejected' | 'all';
@@ -150,7 +154,8 @@ const AdminProductsScreen = ({ navigation }: any) => {
 
   const renderProductCard = ({ item }: { item: Product }) => {
     const isProcessing = processing === item.$id;
-    const imageUri = item.images?.[0] || 'https://via.placeholder.com/100';
+    const imageList = normalizeImageList(item.images);
+    const imageUri = resolveImageUrl(appwriteConfig.productImagesBucketId, imageList[0]);
     return (
       <TouchableOpacity
         style={styles.card}
@@ -158,7 +163,12 @@ const AdminProductsScreen = ({ navigation }: any) => {
         activeOpacity={0.7}
       >
         <View style={styles.cardRow}>
-          <Image source={{ uri: imageUri }} style={styles.productImage} />
+          <PremiumImage
+            uri={imageUri}
+            style={styles.productImage}
+            variant="product"
+            performanceMode="list"
+          />
           <View style={styles.cardInfo}>
             <View style={styles.nameStatusRow}>
               <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
@@ -266,11 +276,14 @@ const AdminProductsScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.screenHeader}>
-        <Ionicons name="cube" size={22} color="#FFF" />
-        <Text style={styles.screenHeaderTitle}>Products</Text>
-      </View>
+      <PremiumTopBar
+        title="Products"
+        subtitle="Approve, reject, feature, or remove listings"
+        icon="cube"
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={onRefresh}
+        rightDisabled={refreshing}
+      />
       {/* Tabs */}
       <View style={styles.tabBar}>
         {tabs.map((tab) => (
@@ -299,6 +312,10 @@ const AdminProductsScreen = ({ navigation }: any) => {
         keyExtractor={(item) => item.$id}
         contentContainerStyle={[styles.listContent, { paddingBottom: 16 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />}
+        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={10}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="cube-outline" size={60} color={COLORS.textTertiary} />

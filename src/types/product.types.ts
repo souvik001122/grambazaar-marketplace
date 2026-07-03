@@ -71,4 +71,5 @@ export interface ProductFilters {
   topArtisansOnly?: boolean;
   sortBy?: 'price_asc' | 'price_desc' | 'rating' | 'newest' | 'trending' | 'trust_high';
   searchQuery?: string;
+  isHomeRegionScope?: boolean;
 }

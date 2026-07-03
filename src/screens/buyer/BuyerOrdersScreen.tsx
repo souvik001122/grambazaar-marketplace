@@ -6,9 +6,9 @@ import {
   FlatList,
   TouchableOpacity,
   RefreshControl,
-  Image,
   ScrollView,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
@@ -18,9 +18,11 @@ import { Order } from '../../types/index';
 import { formatPrice, formatRelativeTime } from '../../utils/formatting';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { StatusBadge } from '../../components/StatusBadge';
+import { PremiumImage } from '../../components/PremiumImage';
 import { resolveImageUrl } from '../../services/storageService';
 import { appwriteConfig } from '../../config/appwrite';
 import { BUYER_LAYOUT } from '../../constants/layout';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 type FilterTab = 'all' | 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
 
@@ -45,11 +47,7 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
   const [error, setError] = useState(false);
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
 
-  useEffect(() => {
-    loadOrders();
-  }, []);
-
-  const loadOrders = async () => {
+  const loadOrders = useCallback(async () => {
     if (!user) return;
     try {
       setError(false);
@@ -63,16 +61,21 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     loadOrders();
-  }, [user]);
+  }, [loadOrders]);
 
-  const filteredOrders = activeTab === 'all'
-    ? orders
-    : orders.filter((o) => o.status === activeTab);
+  const filteredOrders = useMemo(
+    () => (activeTab === 'all' ? orders : orders.filter((o) => o.status === activeTab)),
+    [activeTab, orders]
+  );
 
   const tabCounts = useMemo(() => {
     const counts: Record<FilterTab, number> = {
@@ -94,7 +97,7 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
     return counts;
   }, [orders]);
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = useCallback((status: string) => {
     switch (status) {
       case 'pending': return 'time-outline';
       case 'processing': return 'construct-outline';
@@ -103,8 +106,78 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
       case 'cancelled': return 'close-circle-outline';
       default: return 'ellipsis-horizontal';
     }
-  };
+  }, []);
 
+  // ✅ These hooks MUST be defined before any early returns
+  const renderOrder = useCallback(
+    ({ item }: { item: Order }) => {
+      const firstItem = item.items?.[0];
+      const imageUrl = resolveImageUrl(appwriteConfig.productImagesBucketId, firstItem?.productImage);
+      const itemCount = item.items?.reduce((sum, i) => sum + i.quantity, 0) || 0;
+
+      return (
+        <TouchableOpacity
+          style={styles.orderCard}
+          onPress={() => navigation.navigate('OrderDetail', { orderId: item.$id })}
+          activeOpacity={0.7}
+        >
+          <View style={styles.orderHeader}>
+            <View style={styles.orderIdRow}>
+              <Ionicons name={getStatusIcon(item.status)} size={18} color={COLORS.primary} />
+              <Text style={styles.orderId}>#{item.$id.slice(-8).toUpperCase()}</Text>
+            </View>
+            <StatusBadge status={item.status} size="small" />
+          </View>
+
+          <View style={styles.orderBody}>
+            <PremiumImage
+              uri={imageUrl}
+              style={styles.orderImage}
+              variant="product"
+            />
+            <View style={styles.orderInfo}>
+              <Text style={styles.orderItemName} numberOfLines={1}>
+                {firstItem?.productName || 'Order'}
+              </Text>
+              {itemCount > 1 && (
+                <Text style={styles.moreItems}>+{itemCount - 1} more items</Text>
+              )}
+              <Text style={styles.orderDate}>
+                {item.createdAt ? formatRelativeTime(item.createdAt) : ''}
+              </Text>
+            </View>
+            <Text style={styles.orderAmount}>{formatPrice(item.totalAmount)}</Text>
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [getStatusIcon, navigation]
+  );
+
+  const ordersSummaryHeader = useMemo(
+    () =>
+      orders.length > 0 ? (
+        <View style={styles.ordersSummaryCard}>
+          <View style={styles.ordersSummaryItem}>
+            <Text style={styles.ordersSummaryValue}>{orders.length}</Text>
+            <Text style={styles.ordersSummaryLabel}>Total</Text>
+          </View>
+          <View style={styles.ordersSummaryDivider} />
+          <View style={styles.ordersSummaryItem}>
+            <Text style={styles.ordersSummaryValue}>{tabCounts.pending + tabCounts.processing + tabCounts.shipped}</Text>
+            <Text style={styles.ordersSummaryLabel}>Active</Text>
+          </View>
+          <View style={styles.ordersSummaryDivider} />
+          <View style={styles.ordersSummaryItem}>
+            <Text style={styles.ordersSummaryValue}>{tabCounts.delivered}</Text>
+            <Text style={styles.ordersSummaryLabel}>Delivered</Text>
+          </View>
+        </View>
+      ) : null,
+    [orders.length, tabCounts.delivered, tabCounts.pending, tabCounts.processing, tabCounts.shipped]
+  );
+
+  // Early returns AFTER all hooks
   if (loading && !refreshing) return <LoadingSpinner fullScreen />;
 
   if (error && !refreshing) {
@@ -119,56 +192,18 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
     );
   }
 
-  const renderOrder = ({ item }: { item: Order }) => {
-    const firstItem = item.items?.[0];
-    const imageUrl =
-      resolveImageUrl(appwriteConfig.productImagesBucketId, firstItem?.productImage) ||
-      'https://via.placeholder.com/60';
-    const itemCount = item.items?.reduce((sum, i) => sum + i.quantity, 0) || 0;
-
-    return (
-      <TouchableOpacity
-        style={styles.orderCard}
-        onPress={() => navigation.navigate('OrderDetail', { orderId: item.$id })}
-        activeOpacity={0.7}
-      >
-        <View style={styles.orderHeader}>
-          <View style={styles.orderIdRow}>
-            <Ionicons name={getStatusIcon(item.status)} size={18} color={COLORS.primary} />
-            <Text style={styles.orderId}>#{item.$id.slice(-8).toUpperCase()}</Text>
-          </View>
-          <StatusBadge status={item.status} size="small" />
-        </View>
-
-        <View style={styles.orderBody}>
-          <Image source={{ uri: imageUrl }} style={styles.orderImage} />
-          <View style={styles.orderInfo}>
-            <Text style={styles.orderItemName} numberOfLines={1}>
-              {firstItem?.productName || 'Order'}
-            </Text>
-            {itemCount > 1 && (
-              <Text style={styles.moreItems}>+{itemCount - 1} more items</Text>
-            )}
-            <Text style={styles.orderDate}>
-              {item.createdAt ? formatRelativeTime(item.createdAt) : ''}
-            </Text>
-          </View>
-          <Text style={styles.orderAmount}>{formatPrice(item.totalAmount)}</Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.screenHeader}>
-        <View style={styles.screenHeaderRow}>
-          <Ionicons name="receipt" size={22} color="#FFF" />
-          <Text style={styles.screenHeaderTitle}>My Orders</Text>
-        </View>
-        <Text style={styles.screenHeaderSubtitle}>Track every order update in one place</Text>
-      </View>
+      <PremiumTopBar
+        title="My Orders"
+        subtitle="Track every order update in one place"
+        icon="receipt"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+        rightLabel={refreshing ? 'Refreshing' : 'Refresh'}
+        onRightPress={handleRefresh}
+        rightDisabled={refreshing}
+      />
       {/* Tabs */}
       <View style={styles.tabBarWrap}>
         <ScrollView
@@ -204,27 +239,13 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
         data={filteredOrders}
         keyExtractor={(item) => item.$id}
         renderItem={renderOrder}
+        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        updateCellsBatchingPeriod={80}
         contentContainerStyle={[styles.list, railStyle, { paddingBottom: tabBarHeight }]}
-        ListHeaderComponent={
-          orders.length > 0 ? (
-            <View style={styles.ordersSummaryCard}>
-              <View style={styles.ordersSummaryItem}>
-                <Text style={styles.ordersSummaryValue}>{orders.length}</Text>
-                <Text style={styles.ordersSummaryLabel}>Total</Text>
-              </View>
-              <View style={styles.ordersSummaryDivider} />
-              <View style={styles.ordersSummaryItem}>
-                <Text style={styles.ordersSummaryValue}>{tabCounts.pending + tabCounts.processing + tabCounts.shipped}</Text>
-                <Text style={styles.ordersSummaryLabel}>Active</Text>
-              </View>
-              <View style={styles.ordersSummaryDivider} />
-              <View style={styles.ordersSummaryItem}>
-                <Text style={styles.ordersSummaryValue}>{tabCounts.delivered}</Text>
-                <Text style={styles.ordersSummaryLabel}>Delivered</Text>
-              </View>
-            </View>
-          ) : null
-        }
+        ListHeaderComponent={ordersSummaryHeader}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[COLORS.primary]} />
         }

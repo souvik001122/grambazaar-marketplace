@@ -4,11 +4,13 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Image,
   TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
+import { appwriteConfig } from '../../config/appwrite';
+import { normalizeImageList, resolveImageUrl } from '../../services/storageService';
+import { PremiumImage } from '../../components/PremiumImage';
 
 const AdminProductDetailScreen = ({ route, navigation }: any) => {
   const tabBarHeight = 16;
@@ -40,18 +42,28 @@ const AdminProductDetailScreen = ({ route, navigation }: any) => {
     return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   };
 
+  const productImages = normalizeImageList(product.images)
+    .map((img) => resolveImageUrl(appwriteConfig.productImagesBucketId, img))
+    .filter(Boolean);
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: tabBarHeight }}>
       {/* Image Gallery */}
       <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={styles.imageCarousel}>
-        {product.images && product.images.length > 0 ? (
-          product.images.map((img: string, i: number) => (
-            <Image key={i} source={{ uri: img }} style={styles.productImage} />
+        {productImages.length > 0 ? (
+          productImages.map((img: string, i: number) => (
+            <PremiumImage
+              key={i}
+              uri={img}
+              style={styles.productImage}
+              variant="product"
+            />
           ))
         ) : (
-          <View style={[styles.productImage, styles.placeholderImage]}>
-            <Ionicons name="image-outline" size={60} color={COLORS.textTertiary} />
-          </View>
+          <PremiumImage
+            style={styles.productImage}
+            variant="product"
+          />
         )}
       </ScrollView>
 
