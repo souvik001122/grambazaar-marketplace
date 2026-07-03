@@ -102,7 +102,7 @@ const SellerOrdersScreen = ({ navigation, route }: any) => {
         return next;
       });
 
-      const notifications = await getUserNotifications(user.$id, 1, 100);
+      const notifications = await getUserNotifications(user.$id, 1, 30);
       const paymentEvents: Record<string, { message: string; createdAt: string }> = {};
       notifications.data.forEach((n) => {
         const msg = (n.message || '').toLowerCase();

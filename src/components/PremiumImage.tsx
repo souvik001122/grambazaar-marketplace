@@ -311,24 +311,14 @@ export const PremiumImage: React.FC<PremiumImageProps> = ({
           style={[StyleSheet.absoluteFillObject, { borderRadius }]}
           contentFit={toContentFit(resizeMode)}
           placeholderContentFit={toContentFit(resizeMode)}
-          cachePolicy={isListMode ? 'memory-disk' : 'disk'}
+          cachePolicy="memory-disk"
           priority={isListMode ? 'high' : 'normal'}
-          transition={isListMode ? 0 : 90}
+          transition={isListMode ? 0 : 150}
           allowDownscaling
           onLoadStart={() => {
             if (!isListMode) {
               setIsLoading(true);
             }
-
-            if (!preferOriginalUri && canFallbackToOriginal) {
-              clearFallbackTimer();
-              fallbackTimerRef.current = setTimeout(() => {
-                setPreferOriginalUri(true);
-                setHasError(false);
-                setIsLoading(false);
-              }, isListMode ? PREVIEW_FALLBACK_TIMEOUT_LIST_MS : PREVIEW_FALLBACK_TIMEOUT_DEFAULT_MS);
-            }
-
             onLoadStart?.();
           }}
           onLoad={(event: any) => {
@@ -357,11 +347,7 @@ export const PremiumImage: React.FC<PremiumImageProps> = ({
         />
       )}
 
-      {hasSource && isLoading && !isListMode && !hasError && (
-        <View pointerEvents="none" style={[styles.loaderMask, { borderRadius }]}> 
-          <ActivityIndicator size="small" color={COLORS.primary} />
-        </View>
-      )}
+
 
       {showFallback && (
         <TouchableOpacity

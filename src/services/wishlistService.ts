@@ -8,6 +8,33 @@ type WishlistChangeEvent = {
   action: 'added' | 'removed';
 };
 
+// Global in-memory cache for wishlist state
+const wishlistCache = new Set<string>();
+let cachedWishlistProducts: SavedProduct[] = [];
+let wishlistCacheUserId: string | null = null;
+let wishlistCacheLoaded = false;
+
+export const getCachedWishlistIds = (): Set<string> => wishlistCache;
+export const isWishlistLoaded = (): boolean => wishlistCacheLoaded;
+export const isWishlistedSync = (userId: string | undefined, productId: string): boolean => {
+  if (!userId || wishlistCacheUserId !== userId || !wishlistCacheLoaded) {
+    return false;
+  }
+  return wishlistCache.has(productId);
+};
+export const getCachedWishlistProductsSync = (userId: string | undefined): SavedProduct[] => {
+  if (!userId || wishlistCacheUserId !== userId || !wishlistCacheLoaded) {
+    return [];
+  }
+  return cachedWishlistProducts;
+};
+export const clearWishlistCache = () => {
+  wishlistCache.clear();
+  cachedWishlistProducts = [];
+  wishlistCacheUserId = null;
+  wishlistCacheLoaded = false;
+};
+
 type WishlistListener = (event: WishlistChangeEvent) => void;
 
 const wishlistListeners = new Set<WishlistListener>();
@@ -56,6 +83,15 @@ export const addToWishlist = async (
 
     emitWishlistChange({ userId, productId, action: 'added' });
 
+    // Cache update
+    if (wishlistCacheUserId === userId) {
+      wishlistCache.add(productId);
+      const newSavedProduct = doc as unknown as SavedProduct;
+      if (wishlistCacheLoaded) {
+        cachedWishlistProducts = [newSavedProduct, ...cachedWishlistProducts];
+      }
+    }
+
     return doc as unknown as SavedProduct;
   } catch (error: any) {
     console.error('Error adding to wishlist:', error);
@@ -87,6 +123,12 @@ export const removeFromWishlist = async (
         response.documents[0].$id
       );
       emitWishlistChange({ userId, productId, action: 'removed' });
+
+      // Cache update
+      if (wishlistCacheUserId === userId) {
+        wishlistCache.delete(productId);
+        cachedWishlistProducts = cachedWishlistProducts.filter(item => item.productId !== productId);
+      }
     }
   } catch (error) {
     console.error('Error removing from wishlist:', error);
@@ -101,6 +143,9 @@ export const isInWishlist = async (
   userId: string,
   productId: string
 ): Promise<boolean> => {
+  if (wishlistCacheUserId === userId && wishlistCacheLoaded) {
+    return wishlistCache.has(productId);
+  }
   try {
     const response = await databases.listDocuments(
       appwriteConfig.databaseId,
@@ -125,6 +170,9 @@ export const isInWishlist = async (
 export const getWishlistProductIds = async (
   userId: string
 ): Promise<string[]> => {
+  if (wishlistCacheUserId === userId && wishlistCacheLoaded) {
+    return Array.from(wishlistCache);
+  }
   try {
     const response = await databases.listDocuments(
       appwriteConfig.databaseId,
@@ -136,7 +184,14 @@ export const getWishlistProductIds = async (
       ]
     );
 
-    return response.documents.map((doc: any) => doc.productId);
+    const ids = response.documents.map((doc: any) => doc.productId);
+
+    wishlistCacheUserId = userId;
+    wishlistCache.clear();
+    ids.forEach(id => wishlistCache.add(id));
+    wishlistCacheLoaded = true;
+
+    return ids;
   } catch (error) {
     console.error('Error fetching wishlist:', error);
     return [];
@@ -149,6 +204,9 @@ export const getWishlistProductIds = async (
 export const getWishlistProducts = async (
   userId: string
 ): Promise<SavedProduct[]> => {
+  if (wishlistCacheUserId === userId && wishlistCacheLoaded && cachedWishlistProducts.length > 0) {
+    return cachedWishlistProducts;
+  }
   try {
     const response = await databases.listDocuments(
       appwriteConfig.databaseId,
@@ -160,7 +218,15 @@ export const getWishlistProducts = async (
       ]
     );
 
-    return response.documents as unknown as SavedProduct[];
+    const products = response.documents as unknown as SavedProduct[];
+
+    wishlistCacheUserId = userId;
+    wishlistCache.clear();
+    products.forEach(p => wishlistCache.add(p.productId));
+    cachedWishlistProducts = products;
+    wishlistCacheLoaded = true;
+
+    return products;
   } catch (error) {
     console.error('Error fetching wishlist:', error);
     return [];

@@ -173,6 +173,7 @@ const MyProductsScreen = ({ navigation, route }: any) => {
           uri={imageUrl}
           style={styles.productImage}
           variant="product"
+          performanceMode="list"
         />
         
         <View style={styles.productInfo}>

@@ -590,6 +590,15 @@ const ProfileScreen = ({ navigation }: any) => {
       <View style={styles.section}>
         <TouchableOpacity
           style={styles.menuItem}
+          onPress={() => navigation.navigate('Inbox')}
+        >
+          <Ionicons name="chatbubbles-outline" size={24} color={COLORS.text} />
+          <Text style={styles.menuText}>My Messages</Text>
+          <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuItem}
           onPress={openOrders}
         >
           <Ionicons name="receipt-outline" size={24} color={COLORS.text} />

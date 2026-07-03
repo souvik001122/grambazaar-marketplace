@@ -438,9 +438,12 @@ const RegionExploreScreen = ({ navigation, route }: any) => {
           return;
         }
 
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        let position = await Location.getLastKnownPositionAsync({});
+        if (!position) {
+          position = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+        }
 
         setUserCoords({
           latitude: position.coords.latitude,
@@ -837,7 +840,7 @@ const RegionExploreScreen = ({ navigation, route }: any) => {
           product={item}
           fullWidth
           performanceMode="list"
-          onPress={() => navigation.navigate('ProductDetail', { productId: item.$id })}
+          onPress={() => navigation.navigate('ProductDetail', { productId: item.$id, initialProduct: item })}
         />
       </View>
     ),
@@ -1207,42 +1210,34 @@ const RegionExploreScreen = ({ navigation, route }: any) => {
               <View style={styles.listLoaderWrap}>
                 <ActivityIndicator size="large" color={COLORS.primary} />
               </View>
-            ) : products.length > 0 ? (
-              <>
-                <FlatList
-                  data={products}
-                  keyExtractor={(item) => item.$id}
-                  numColumns={2}
-                  scrollEnabled={false}
-                  removeClippedSubviews={Platform.OS === 'android'}
-                  initialNumToRender={6}
-                  maxToRenderPerBatch={6}
-                  windowSize={5}
-                  updateCellsBatchingPeriod={90}
-                  contentContainerStyle={styles.productsGridList}
-                  columnWrapperStyle={styles.productsGridRow}
-                  renderItem={renderProductCardInline}
-                />
-                {loadingMore ? (
-                  <View style={styles.loadMoreFooter}>
-                    <ActivityIndicator size="small" color={COLORS.primary} />
-                  </View>
-                ) : hasMore ? (
-                  <TouchableOpacity style={styles.loadMoreButton} onPress={loadMoreProducts}>
-                    <Text style={styles.loadMoreButtonText}>Load More Products</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </>
-            ) : (
+            ) : products.length === 0 ? (
               <View style={styles.productsEmptyWrap}>
                 <Ionicons name="location-outline" size={34} color={COLORS.textTertiary} />
                 <Text style={styles.emptyText}>No products found for this region path.</Text>
               </View>
-            )}
+            ) : null}
           </View>
         </>
       )}
     </>
+  );
+
+  const listFooterComponent = (
+    <View style={{ paddingVertical: 12 }}>
+      {productsExpanded && !loading && (
+        <>
+          {loadingMore ? (
+            <View style={styles.loadMoreFooter}>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            </View>
+          ) : hasMore ? (
+            <TouchableOpacity style={styles.loadMoreButton} onPress={loadMoreProducts}>
+              <Text style={styles.loadMoreButtonText}>Load More Products</Text>
+            </TouchableOpacity>
+          ) : null}
+        </>
+      )}
+    </View>
   );
 
   return (
@@ -1395,14 +1390,24 @@ const RegionExploreScreen = ({ navigation, route }: any) => {
         </View>
       ) : null}
 
-      <ScrollView
-        contentContainerStyle={styles.listContent}
+      <FlatList
+        data={productsExpanded && !loading ? products : []}
+        keyExtractor={(item) => item.$id}
+        numColumns={2}
+        columnWrapperStyle={styles.row}
+        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={5}
+        updateCellsBatchingPeriod={90}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         onScrollBeginDrag={Keyboard.dismiss}
-      >
-        {listHeaderComponent}
-      </ScrollView>
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={listHeaderComponent}
+        renderItem={renderProductCardInline}
+        ListFooterComponent={listFooterComponent}
+      />
     </View>
   );
 };

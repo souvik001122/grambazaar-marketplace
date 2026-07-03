@@ -643,7 +643,7 @@ export const BecomeSellerScreen = ({ onProfileCreated }: any) => {
         craftType: formData.craftType,
         skills: formData.skills,
         phone,
-        address: formData.address,
+        address: `${formData.address}${formData.localityPincode ? `, PIN: ${formData.localityPincode}` : ''}`,
         district: formData.district,
         locality: formData.locality,
         village: formData.locality,

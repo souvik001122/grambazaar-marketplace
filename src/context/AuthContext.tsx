@@ -3,6 +3,8 @@ import { account, EMAIL_VERIFICATION_URL } from '../config/appwrite';
 import { User } from '../types/user.types';
 import { getUserById, createUser, getUserByEmail, getUserByPhone } from '../services/userService';
 import { Models, ID } from 'appwrite';
+import { readAuthCache, writeAuthCache, clearAuthCache } from '../utils/persistentCache';
+import { getWishlistProductIds, clearWishlistCache } from '../services/wishlistService';
 
 interface AuthContextType {
   user: User | null;
@@ -63,12 +65,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Check if user is already logged in on mount
   useEffect(() => {
-    checkAuth();
+    const initAuth = async () => {
+      try {
+        const cachedUser = await readAuthCache();
+        if (cachedUser) {
+          setUser(cachedUser);
+          setLoading(false);
+          if (cachedUser.$id) {
+            getWishlistProductIds(cachedUser.$id).catch(() => {});
+          }
+        }
+      } catch (e) {
+        // Cache read failed, checkAuth will handle it
+      }
+      await checkAuth();
+    };
+
+    initAuth();
   }, []);
 
   const checkAuth = async () => {
     try {
-      setLoading(true);
+      setUser((currentVal) => {
+        if (!currentVal) {
+          setLoading(true);
+        }
+        return currentVal;
+      });
       const session = await account.get();
       
       if (session) {
@@ -90,10 +113,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         
         setUser(userData);
+        await writeAuthCache(userData);
+        if (userData && userData.$id) {
+          getWishlistProductIds(userData.$id).catch(() => {});
+        }
+      } else {
+        setUser(null);
+        await clearAuthCache();
       }
     } catch (error) {
       // No active session at startup; keep auth state null silently.
       setUser(null);
+      await clearAuthCache();
     } finally {
       setLoading(false);
     }
@@ -139,6 +170,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       
       setUser(userData);
+      if (userData) {
+        await writeAuthCache(userData);
+        if (userData.$id) {
+          getWishlistProductIds(userData.$id).catch(() => {});
+        }
+      }
     } catch (error: any) {
       console.error('Login error:', error);
       throw new Error(error.message || 'Failed to login');
@@ -274,6 +311,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await createFreshEmailSession(tempEmail, tempPassword);
       
       setUser(userData);
+      if (userData) {
+        await writeAuthCache(userData);
+        if (userData.$id) {
+          getWishlistProductIds(userData.$id).catch(() => {});
+        }
+      }
     } catch (error: any) {
       console.error('Phone registration error:', error);
       throw new Error(error.message || 'Failed to register with phone');
@@ -327,6 +370,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await createFreshEmailSession(tempEmail, tempPassword);
         
         setUser(userData);
+        if (userData) {
+          await writeAuthCache(userData);
+          if (userData.$id) {
+            getWishlistProductIds(userData.$id).catch(() => {});
+          }
+        }
       } else {
         // Production: Appwrite phone session
         throw new Error('Phone OTP not configured for production yet');
@@ -371,6 +420,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
       setUser(null);
+      await clearAuthCache();
+      clearWishlistCache();
     } catch (error) {
       console.error('Logout error:', error);
       throw new Error('Failed to logout');
@@ -400,6 +451,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         
         setUser(userData);
+        if (userData) {
+          await writeAuthCache(userData);
+          if (userData.$id) {
+            getWishlistProductIds(userData.$id).catch(() => {});
+          }
+        }
       }
     } catch (error) {
       console.error('Refresh user error:', error);

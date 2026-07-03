@@ -18,6 +18,8 @@ import SellerNotificationsScreen from '../screens/seller/SellerNotificationsScre
 import SellerSettingsScreen from '../screens/seller/SellerSettingsScreen';
 import { SellerVerificationStatusScreen } from '../screens/seller/SellerVerificationStatusScreen';
 import ProfileScreen from '../screens/shared/ProfileScreen';
+import ChatScreen from '../screens/shared/ChatScreen';
+import InboxScreen from '../screens/shared/InboxScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -109,6 +111,16 @@ const SellerNavigator = () => {
       <Stack.Screen
         name="VerificationStatus"
         component={SellerVerificationStatusScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Inbox"
+        component={InboxScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={ChatScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

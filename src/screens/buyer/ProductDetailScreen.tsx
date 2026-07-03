@@ -16,10 +16,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
 import { useAuth } from '../../context/AuthContext';
 import { useCartStore } from '../../stores/cartStore';
-import { getProductById, incrementProductViews } from '../../services/productService';
+import { getProductById, incrementProductViews, getCachedProductSync } from '../../services/productService';
 import { getProductReviews, getSellerReviews } from '../../services/reviewService';
-import { getSellerById } from '../../services/sellerService';
-import { addToWishlist, removeFromWishlist, isInWishlist } from '../../services/wishlistService';
+import { getSellerById, getCachedSellerSync } from '../../services/sellerService';
+import { addToWishlist, removeFromWishlist, isInWishlist, isWishlistedSync } from '../../services/wishlistService';
 import { Product } from '../../types/product.types';
 import { Review } from '../../types/common.types';
 import { Seller } from '../../types/seller.types';
@@ -170,11 +170,24 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
   const { user } = useAuth();
   const { addToCart, items: cartItems } = useCartStore();
 
-  const [product, setProduct] = useState<Product | null>(null);
-  const [seller, setSeller] = useState<Seller | null>(null);
+  const initialProduct = route?.params?.initialProduct;
+  const resolvedInitialProduct = initialProduct || (productId ? getCachedProductSync(productId) : null);
+
+  const [product, setProduct] = useState<Product | null>(resolvedInitialProduct);
+  const [seller, setSeller] = useState<Seller | null>(() => {
+    if (resolvedInitialProduct) {
+      return getCachedSellerSync(resolvedInitialProduct.sellerId);
+    }
+    return null;
+  });
   const [reviews, setReviews] = useState<Review[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [wishlisted, setWishlisted] = useState(false);
+  const [loading, setLoading] = useState(!resolvedInitialProduct);
+  const [wishlisted, setWishlisted] = useState(() => {
+    if (user && productId) {
+      return isWishlistedSync(user.$id, productId);
+    }
+    return false;
+  });
   const [wishlistLoading, setWishlistLoading] = useState(false);
   const [quantity, setQuantity] = useState(1);
   const [activeImage, setActiveImage] = useState(0);
@@ -277,31 +290,53 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
 
   const loadProduct = async () => {
     try {
-      setLoading(true);
-      const prod = await getProductById(productId);
+      if (!product) {
+        setLoading(true);
+      }
+      
+      const sellerIdToFetch = product ? product.sellerId : null;
+      
+      const prodPromise = getProductById(productId);
+      const sellerPromise = sellerIdToFetch ? getSellerById(sellerIdToFetch).catch(() => null) : Promise.resolve(null);
+      const reviewsPromise = getProductReviews(productId, 1, 5).catch(() => ({ data: [] as Review[], total: 0 }));
+      const wishPromise = user ? isInWishlist(user.$id, productId).catch(() => false) : Promise.resolve(false);
+      const sellerReviewPromise = sellerIdToFetch ? getSellerReviews(sellerIdToFetch, 1, 1).catch(() => ({ total: 0 })) : Promise.resolve({ total: 0 });
+
+      const [prod, sellerData, reviewsData, wishStatus, sellerReviewSummary] = await Promise.all([
+        prodPromise,
+        sellerPromise,
+        reviewsPromise,
+        wishPromise,
+        sellerReviewPromise,
+      ]);
+
       if (!prod) {
         showAlert('Error', 'Product not found');
         navigation.goBack();
         return;
       }
+
       setProduct(prod);
-      incrementProductViews(prod.$id).catch(() => {});
 
-      // Load seller, reviews, wishlist status in parallel
-      const [sellerData, reviewsData, wishStatus, sellerReviewSummary] = await Promise.all([
-        getSellerById(prod.sellerId).catch(() => null),
-        getProductReviews(prod.$id, 1, 5).catch(() => ({ data: [] as Review[], total: 0, page: 1, perPage: 5, hasMore: false })),
-        user ? isInWishlist(user.$id, prod.$id).catch(() => false) : Promise.resolve(false),
-        getSellerReviews(prod.sellerId, 1, 1).catch(() => ({ data: [] as Review[], total: 0, page: 1, perPage: 1, hasMore: false })),
-      ]);
+      if (!sellerIdToFetch) {
+        const finalSeller = await getSellerById(prod.sellerId).catch(() => null);
+        setSeller(finalSeller);
+        const finalSellerSummary = await getSellerReviews(prod.sellerId, 1, 1).catch(() => ({ total: 0 }));
+        setSellerReviewTotal(finalSellerSummary.total || 0);
+      } else {
+        setSeller(sellerData);
+        setSellerReviewTotal(sellerReviewSummary.total || 0);
+      }
 
-      setSeller(sellerData);
       setReviews(reviewsData.data);
       setWishlisted(wishStatus);
-      setSellerReviewTotal(sellerReviewSummary.total || 0);
+      incrementProductViews(prod.$id).catch(() => {});
     } catch (err) {
       console.error('Error loading product:', err);
-      showAlert('Error', 'Failed to load product details');
+      if (!product) {
+        showAlert('Error', 'Failed to load product details');
+        navigation.goBack();
+      }
     } finally {
       setLoading(false);
     }
@@ -327,9 +362,12 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
           return;
         }
 
-        const position = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        let position = await Location.getLastKnownPositionAsync({});
+        if (!position) {
+          position = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+        }
 
         const km = getDistanceKm(
           position.coords.latitude,
@@ -705,6 +743,26 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
                 <Ionicons name="person-circle-outline" size={16} color="#FFF" />
                 <Text style={styles.sellerPrimaryActionText}>View Seller Profile</Text>
               </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.sellerSecondaryAction}
+                onPress={() => {
+                  if (!user) {
+                    showAlert('Login Required', 'Please login to chat with the seller.');
+                    return;
+                  }
+                  navigation.navigate('Chat', {
+                    otherParticipantId: seller.userId,
+                    otherParticipantName: seller.businessName,
+                    otherParticipantRole: 'seller',
+                    productId: product.$id,
+                  });
+                }}
+              >
+                <Ionicons name="chatbubble-ellipses-outline" size={16} color={COLORS.primary} />
+                <Text style={styles.sellerSecondaryActionText}>Chat with Artisan</Text>
+              </TouchableOpacity>
+              
               <Text style={styles.sellerActionHint}>
                 Map, directions, call, and WhatsApp are available inside the seller profile.
               </Text>
@@ -786,7 +844,6 @@ const ProductDetailScreen = ({ route, navigation }: any) => {
               ref={pinchRef}
               onGestureEvent={handlePinchGestureEvent}
               onHandlerStateChange={handlePinchStateChange}
-              minPointers={2}
               shouldCancelWhenOutside={false}
               simultaneousHandlers={panRef}
             >
@@ -1206,6 +1263,22 @@ const styles = StyleSheet.create({
   },
   sellerPrimaryActionText: {
     color: '#FFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  sellerSecondaryAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.surface,
+    paddingVertical: 10,
+  },
+  sellerSecondaryActionText: {
+    color: COLORS.primary,
     fontSize: 13,
     fontWeight: '800',
   },

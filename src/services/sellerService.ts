@@ -21,6 +21,64 @@ import {
 } from '../utils/validation';
 import { INDIAN_STATES } from '../constants/regions';
 
+// Global in-memory cache for seller profiles
+export const sellerCache = new Map<string, Seller>();
+const sellerCacheTimestamps = new Map<string, number>();
+const SELLER_CACHE_MAX_SIZE = 500;
+const SELLER_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+const sellerInvalidationListeners: Array<(sellerId: string) => void> = [];
+
+export const registerSellerInvalidationListener = (listener: (sellerId: string) => void) => {
+  sellerInvalidationListeners.push(listener);
+};
+
+export const invalidateSellerCache = (sellerId: string) => {
+  sellerCache.delete(sellerId);
+  sellerCacheTimestamps.delete(sellerId);
+  sellerInvalidationListeners.forEach((listener) => {
+    try {
+      listener(sellerId);
+    } catch (e) {
+      console.error('Error in seller invalidation listener:', e);
+    }
+  });
+};
+
+export const clearAllSellerCaches = () => {
+  sellerCache.clear();
+  sellerCacheTimestamps.clear();
+  sellerInvalidationListeners.forEach((listener) => {
+    try {
+      listener('*');
+    } catch (e) {
+      console.error('Error in seller invalidation listener:', e);
+    }
+  });
+};
+
+const setSellerCache = (sellerId: string, seller: Seller) => {
+  if (sellerCache.size >= SELLER_CACHE_MAX_SIZE) {
+    sellerCache.clear();
+    sellerCacheTimestamps.clear();
+  }
+  sellerCache.set(sellerId, seller);
+  sellerCacheTimestamps.set(sellerId, Date.now());
+};
+
+export const getCachedSellerSync = (sellerId: string): Seller | null => {
+  const cached = sellerCache.get(sellerId);
+  if (cached) {
+    const ts = sellerCacheTimestamps.get(sellerId) || 0;
+    if (Date.now() - ts < SELLER_CACHE_TTL_MS) {
+      return cached;
+    }
+    sellerCache.delete(sellerId);
+    sellerCacheTimestamps.delete(sellerId);
+  }
+  return null;
+};
+
 const normalizeText = (value?: string): string =>
   (value || '').replace(/\s+/g, ' ').trim();
 
@@ -362,7 +420,11 @@ export const createSeller = async (data: CreateSellerDTO): Promise<Seller> => {
       // Non-critical — don't block seller creation if notification fails
     }
 
-    return seller as unknown as Seller;
+    const result = seller as unknown as Seller;
+    if (result && result.$id) {
+      setSellerCache(result.$id, result);
+    }
+    return result;
   } catch (error) {
     console.error('Error creating seller:', error);
     const rawMessage = extractErrorMessage(error);
@@ -374,6 +436,11 @@ export const createSeller = async (data: CreateSellerDTO): Promise<Seller> => {
  * Get seller by user ID
  */
 export const getSellerByUserId = async (userId: string): Promise<Seller | null> => {
+  for (const seller of sellerCache.values()) {
+    if (seller.userId === userId) {
+      return seller;
+    }
+  }
   try {
     const response = await databases.listDocuments(
       appwriteConfig.databaseId,
@@ -385,7 +452,11 @@ export const getSellerByUserId = async (userId: string): Promise<Seller | null> 
       return null;
     }
 
-    return response.documents[0] as unknown as Seller;
+    const seller = response.documents[0] as unknown as Seller;
+    if (seller) {
+      setSellerCache(seller.$id, seller);
+    }
+    return seller;
   } catch (error) {
     console.error('Error fetching seller:', error);
     return null;
@@ -396,13 +467,21 @@ export const getSellerByUserId = async (userId: string): Promise<Seller | null> 
  * Get seller by seller ID
  */
 export const getSellerById = async (sellerId: string): Promise<Seller | null> => {
+  const cached = getCachedSellerSync(sellerId);
+  if (cached) {
+    return cached;
+  }
   try {
     const doc = await databases.getDocument(
       appwriteConfig.databaseId,
       appwriteConfig.sellersCollectionId,
       sellerId
     );
-    return doc as unknown as Seller;
+    const seller = doc as unknown as Seller;
+    if (seller) {
+      setSellerCache(sellerId, seller);
+    }
+    return seller;
   } catch (error) {
     if (isNotFoundError(error)) {
       return null;
@@ -437,7 +516,11 @@ export const updateSeller = async (
       }
     );
 
-    return updated as unknown as Seller;
+    const result = updated as unknown as Seller;
+    if (result && result.$id) {
+      invalidateSellerCache(result.$id);
+    }
+    return result;
   } catch (error) {
     console.error('Error updating seller:', error);
     throw new Error('Failed to update seller');
@@ -474,7 +557,11 @@ export const verifySeller = async (data: VerifySellerDTO): Promise<Seller> => {
 
     await sendNotification(seller.userId, message, 'verification', seller.$id, 'seller');
 
-    return updated as unknown as Seller;
+    const result = updated as unknown as Seller;
+    if (result && result.$id) {
+      invalidateSellerCache(result.$id);
+    }
+    return result;
   } catch (error) {
     console.error('Error verifying seller:', error);
     throw new Error('Failed to verify seller');
@@ -518,7 +605,17 @@ export const getSellersByRegion = async (state: string): Promise<Seller[]> => {
     );
 
     if (strictResponse.documents.length > 0) {
-      return strictResponse.documents as unknown as Seller[];
+      const sellers = strictResponse.documents as unknown as Seller[];
+      if (sellerCache.size + sellers.length >= SELLER_CACHE_MAX_SIZE) {
+        sellerCache.clear();
+        sellerCacheTimestamps.clear();
+      }
+      sellers.forEach((s) => {
+        if (s && s.$id) {
+          setSellerCache(s.$id, s);
+        }
+      });
+      return sellers;
     }
 
     const normalizedState = normalizeText(state).toLowerCase();
@@ -551,6 +648,16 @@ export const getSellersByRegion = async (state: string): Promise<Seller[]> => {
       })
       .sort((a, b) => (b.rating || 0) - (a.rating || 0));
 
+    if (sellerCache.size + filtered.length >= SELLER_CACHE_MAX_SIZE) {
+      sellerCache.clear();
+      sellerCacheTimestamps.clear();
+    }
+    filtered.forEach((s) => {
+      if (s && s.$id) {
+        setSellerCache(s.$id, s);
+      }
+    });
+
     return filtered;
   } catch (error) {
     console.error('Error fetching sellers by region:', error);
@@ -573,7 +680,18 @@ export const getTopVerifiedSellers = async (limit: number = 200): Promise<Seller
       ]
     );
 
-    return response.documents as unknown as Seller[];
+    const sellers = response.documents as unknown as Seller[];
+    if (sellerCache.size + sellers.length >= SELLER_CACHE_MAX_SIZE) {
+      sellerCache.clear();
+      sellerCacheTimestamps.clear();
+    }
+    sellers.forEach((s) => {
+      if (s && s.$id) {
+        setSellerCache(s.$id, s);
+      }
+    });
+
+    return sellers;
   } catch (error) {
     console.error('Error fetching top verified sellers:', error);
     return [];
@@ -641,6 +759,7 @@ export const toggleShopStatus = async (
         updatedAt: new Date().toISOString(),
       }
     );
+    invalidateSellerCache(seller.$id);
   } catch (error) {
     console.error('Error toggling shop status:', error);
     throw new Error('Failed to update shop status');
@@ -666,6 +785,7 @@ export const deleteSellerProfile = async (sellerId: string): Promise<void> => {
       appwriteConfig.sellersCollectionId,
       sellerId
     );
+    invalidateSellerCache(sellerId);
   } catch (error) {
     console.error('Error deleting seller profile:', error);
     throw new Error('Failed to delete seller profile');

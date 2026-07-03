@@ -540,6 +540,53 @@ export const getSellerOrderCount = async (sellerId: string): Promise<number> => 
 };
 
 /**
+ * Get order status counts for seller dashboard
+ */
+export const getSellerOrderStats = async (
+  sellerId: string
+): Promise<{ total: number; delivered: number; cancelled: number }> => {
+  try {
+    const [totalRes, deliveredRes, cancelledRes] = await Promise.all([
+      databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.ordersCollectionId,
+        [
+          Query.equal('sellerId', sellerId),
+          Query.limit(1),
+        ]
+      ),
+      databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.ordersCollectionId,
+        [
+          Query.equal('sellerId', sellerId),
+          Query.equal('status', 'delivered'),
+          Query.limit(1),
+        ]
+      ),
+      databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.ordersCollectionId,
+        [
+          Query.equal('sellerId', sellerId),
+          Query.equal('status', 'cancelled'),
+          Query.limit(1),
+        ]
+      ),
+    ]);
+    return {
+      total: totalRes.total,
+      delivered: deliveredRes.total,
+      cancelled: cancelledRes.total,
+    };
+  } catch (error) {
+    console.error('Error fetching seller order stats:', error);
+    return { total: 0, delivered: 0, cancelled: 0 };
+  }
+};
+
+
+/**
  * Get seller revenue
  */
 export const getSellerRevenue = async (sellerId: string): Promise<number> => {

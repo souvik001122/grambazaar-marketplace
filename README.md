@@ -1,5 +1,9 @@
 # GramBazaar
 
+[![Download APK](https://img.shields.io/badge/Download-Android%20APK-1f7a1f?style=for-the-badge&logo=android)](https://expo.dev/accounts/souvik_111222/projects/grambazaar/builds/6c3829f0-5e0c-4a9e-9ecd-5df691d3fbca)
+
+**Latest Android APK:** [Download the current GramBazaar APK from EAS Build](https://expo.dev/accounts/souvik_111222/projects/grambazaar/builds/6c3829f0-5e0c-4a9e-9ecd-5df691d3fbca)
+
 GramBazaar is a region-focused marketplace that connects verified rural artisans with buyers looking for authentic, unique, and locality-specific products.
 
 It is designed to work as an online + offline bridge:
@@ -119,6 +123,12 @@ expo start --web
 npm run android
 npm run ios
 ```
+
+## APK Download
+
+> **Android APK Download:** [Download the latest GramBazaar APK from EAS Build](https://expo.dev/accounts/souvik_111222/projects/grambazaar/builds/6c3829f0-5e0c-4a9e-9ecd-5df691d3fbca)
+>
+> This is the latest successful Android build artifact. iOS builds use a different format (IPA), not APK.
 
 ## Appwrite Setup Notes
 

@@ -17,7 +17,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { ProductCard } from '../../components/ProductCard';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { Product } from '../../types/product.types';
-import { searchMarketplaceProducts } from '../../services/productService';
+import { searchMarketplaceProducts, getProducts, getProductSuggestions } from '../../services/productService';
+import { getTopVerifiedSellers } from '../../services/sellerService';
+import { INDIAN_STATES } from '../../constants/regions';
+import { readHomeCache } from '../../utils/persistentCache';
 import { COLORS } from '../../constants/colors';
 import { CATEGORIES } from '../../constants/categories';
 import { BUYER_LAYOUT } from '../../constants/layout';
@@ -52,6 +55,24 @@ const SEARCH_PAGE_SIZE = 12;
 const clampNumber = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
+const getCategoryShortName = (cat: { id: string; name: string }) => {
+  switch (cat.id) {
+    case 'pottery': return 'Pottery';
+    case 'textiles': return 'Textiles';
+    case 'handicrafts': return 'Handicrafts';
+    case 'jewelry': return 'Jewelry';
+    case 'woodwork': return 'Wood Work';
+    case 'metalwork': return 'Metal Work';
+    case 'paintings': return 'Paintings';
+    case 'food': return 'Food';
+    case 'leather': return 'Leather';
+    case 'bamboo': return 'Bamboo';
+    case 'stone': return 'Stone';
+    case 'other': return 'Other';
+    default: return cat.name;
+  }
+};
+
 const parsePriceInput = (value: string): number | undefined => {
   const cleaned = value.trim();
   if (!cleaned) {
@@ -80,6 +101,92 @@ const parseRatingInput = (value: string): number | undefined => {
   return clampNumber(parsed, 0, 5);
 };
 
+const parseSmartSearchIntent = (query: string) => {
+  let cleanedQuery = query.toLowerCase().trim();
+  const intents: {
+    minPrice?: string;
+    maxPrice?: string;
+    minRating?: string;
+    verifiedOnly?: boolean;
+    topArtisansOnly?: boolean;
+    deliveryOnly?: boolean;
+    category?: string;
+    region?: string;
+    searchQuery: string;
+  } = {
+    searchQuery: query,
+  };
+
+  // 1. Parse verified intent
+  if (/\b(verified|certified|authentic)\b/i.test(cleanedQuery)) {
+    intents.verifiedOnly = true;
+    cleanedQuery = cleanedQuery.replace(/\b(verified|certified|authentic)\b/gi, '').trim();
+  }
+
+  // 2. Parse top artisan intent
+  if (/\b(top|best|leading|expert)\b/i.test(cleanedQuery)) {
+    intents.topArtisansOnly = true;
+    cleanedQuery = cleanedQuery.replace(/\b(top|best|leading|expert)\b/gi, '').trim();
+  }
+
+  // 3. Parse delivery intent
+  if (/\b(delivery|shipping|home delivery|with delivery)\b/i.test(cleanedQuery)) {
+    intents.deliveryOnly = true;
+    cleanedQuery = cleanedQuery.replace(/\b(delivery|shipping|home delivery|with delivery)\b/gi, '').trim();
+  }
+
+  // 4. Parse price intents
+  // 4.1 "between X and Y", "X to Y", "X-Y"
+  const rangeMatch = cleanedQuery.match(/\b(?:between\s+)?(?:rs\.?|₹\s*)?(\d+)\s*(?:to|and|-)\s*(?:rs\.?|₹\s*)?(\d+)\b/i);
+  if (rangeMatch) {
+    intents.minPrice = rangeMatch[1];
+    intents.maxPrice = rangeMatch[2];
+    cleanedQuery = cleanedQuery.replace(rangeMatch[0], '').trim();
+  } else {
+    // 4.2 "under X", "below X", "less than X", "< X"
+    const underMatch = cleanedQuery.match(/\b(?:under|below|less\s+than|<)\s*(?:rs\.?|₹\s*)?(\d+)\b/i);
+    if (underMatch) {
+      intents.maxPrice = underMatch[1];
+      cleanedQuery = cleanedQuery.replace(underMatch[0], '').trim();
+    } else {
+      // 4.3 "above X", "greater than X", "> X"
+      const aboveMatch = cleanedQuery.match(/\b(?:above|greater\s+than|>)\s*(?:rs\.?|₹\s*)?(\d+)\b/i);
+      if (aboveMatch) {
+        intents.minPrice = aboveMatch[1];
+        cleanedQuery = cleanedQuery.replace(aboveMatch[0], '').trim();
+      }
+    }
+  }
+
+  // 5. Parse rating intents: "above X rating", "X star"
+  const ratingMatch = cleanedQuery.match(/\b(\d+(?:\.\d+)?)\s*(?:star|rating|stars)\b/i);
+  if (ratingMatch) {
+    const r = parseFloat(ratingMatch[1]);
+    if (r >= 0 && r <= 5) {
+      intents.minRating = String(r);
+    }
+    cleanedQuery = cleanedQuery.replace(ratingMatch[0], '').trim();
+  } else {
+    const ratingWordMatch = cleanedQuery.match(/\b(?:above|greater\s+than)\s*(\d+(?:\.\d+)?)\b/i);
+    if (ratingWordMatch) {
+      const r = parseFloat(ratingWordMatch[1]);
+      if (r >= 0 && r <= 5) {
+        intents.minRating = String(r);
+        cleanedQuery = cleanedQuery.replace(ratingWordMatch[0], '').trim();
+      }
+    }
+  }
+
+  // NOTE: Category is intentionally NOT extracted from the search query.
+  // Typing a category name (e.g. "pottery", "textiles") should be treated as a
+  // plain keyword search — the backend will match products by category in the
+  // full-text search. The category filter should only be set manually via the
+  // Category filter section, never auto-applied from the search bar.
+
+  intents.searchQuery = cleanedQuery.replace(/\s+/g, ' ').trim();
+  return intents;
+};
+
 const SearchScreen = ({ navigation, route }: any) => {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const isCompact = screenHeight < 760;
@@ -95,6 +202,9 @@ const SearchScreen = ({ navigation, route }: any) => {
   const [searched, setSearched] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('');
+  const [regionSource, setRegionSource] = useState<'home' | 'explicit' | ''>('');
+  const [regionFocused, setRegionFocused] = useState(false);
+  const [localityFocused, setLocalityFocused] = useState(false);
   const [sortBy, setSortBy] = useState<SortOption | ''>('');
   const [minPrice, setMinPrice] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
@@ -112,8 +222,18 @@ const SearchScreen = ({ navigation, route }: any) => {
   const [trustExpanded, setTrustExpanded] = useState(true);
   const [priceExpanded, setPriceExpanded] = useState(true);
   const [ratingExpanded, setRatingExpanded] = useState(true);
+  const [locationExpanded, setLocationExpanded] = useState(true);
   const [homeSearchTrigger, setHomeSearchTrigger] = useState(0);
   const latestSearchRequestId = useRef(0);
+  const blurTimeoutRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (blurTimeoutRef.current) {
+        clearTimeout(blurTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const routeParams = route?.params || {};
@@ -139,6 +259,7 @@ const SearchScreen = ({ navigation, route }: any) => {
     setSelectedCategory(routeCategory || '');
     setSortBy(isSortOption(routeSort) ? routeSort : '');
     setSelectedRegion(routeRegion || '');
+    setRegionSource(routeRegion ? 'home' : '');
     setLocalityQuery(routeLocality || '');
     setSearchQuery(hasSearchQueryParam ? routeSearchQuery : '');
     setTopArtisansOnly(hasTopArtisansParam ? routeTopArtisansOnly : false);
@@ -245,14 +366,32 @@ const SearchScreen = ({ navigation, route }: any) => {
       overrides?: {
         searchQuery?: string;
         localityQuery?: string;
+        category?: string;
+        region?: string;
+        minPrice?: string;
+        maxPrice?: string;
+        minRating?: string;
+        verifiedOnly?: boolean;
+        topArtisansOnly?: boolean;
+        deliveryOnly?: boolean;
+        isHomeRegionScope?: boolean;
       }
     ) => {
       const p = reset ? 1 : page + 1;
-      const searchValue = (overrides?.searchQuery ?? searchQuery).trim();
-      const localityValue = (overrides?.localityQuery ?? localityQuery).trim();
-      const rawMinPrice = parsePriceInput(minPrice);
-      const rawMaxPrice = parsePriceInput(maxPrice);
-      const normalizedRatingFilter = parseRatingInput(minRating);
+      const searchValue = (overrides?.hasOwnProperty('searchQuery') ? overrides.searchQuery : searchQuery) ?? '';
+      const localityValue = (overrides?.hasOwnProperty('localityQuery') ? overrides.localityQuery : localityQuery) ?? '';
+      
+      const catValue = overrides?.hasOwnProperty('category') ? overrides.category : selectedCategory;
+      const regValue = overrides?.hasOwnProperty('region') ? overrides.region : selectedRegion;
+
+      const rawMinPrice = parsePriceInput(overrides?.hasOwnProperty('minPrice') ? (overrides.minPrice || '') : minPrice);
+      const rawMaxPrice = parsePriceInput(overrides?.hasOwnProperty('maxPrice') ? (overrides.maxPrice || '') : maxPrice);
+      const normalizedRatingFilter = parseRatingInput(overrides?.hasOwnProperty('minRating') ? (overrides.minRating || '') : minRating);
+      
+      const isVerified = overrides?.hasOwnProperty('verifiedOnly') ? overrides.verifiedOnly : verifiedOnly;
+      const isTop = overrides?.hasOwnProperty('topArtisansOnly') ? overrides.topArtisansOnly : topArtisansOnly;
+      const isDelivery = overrides?.hasOwnProperty('deliveryOnly') ? overrides.deliveryOnly : deliveryOnly;
+
       const normalizedMinPrice =
         rawMinPrice !== undefined && rawMaxPrice !== undefined
           ? Math.min(rawMinPrice, rawMaxPrice)
@@ -283,15 +422,18 @@ const SearchScreen = ({ navigation, route }: any) => {
           {
             searchQuery: searchValue || undefined,
             localityQuery: localityValue || undefined,
-            category: selectedCategory || undefined,
-            region: selectedRegion || undefined,
+            category: catValue || undefined,
+            region: regValue || undefined,
             minPrice: effectiveMinPrice,
             maxPrice: effectiveMaxPrice,
             minRating: normalizedRatingFilter,
             sortBy: sortBy || undefined,
-            verifiedSellers: verifiedOnly || undefined,
-            topArtisansOnly: topArtisansOnly || undefined,
-            deliveryAvailable: deliveryOnly || undefined,
+            verifiedSellers: isVerified || undefined,
+            topArtisansOnly: isTop || undefined,
+            deliveryAvailable: isDelivery || undefined,
+            isHomeRegionScope: overrides?.hasOwnProperty('isHomeRegionScope')
+              ? overrides.isHomeRegionScope
+              : regionSource === 'home',
           },
           p,
           SEARCH_PAGE_SIZE
@@ -346,6 +488,7 @@ const SearchScreen = ({ navigation, route }: any) => {
       verifiedOnly,
       topArtisansOnly,
       deliveryOnly,
+      regionSource,
     ]
   );
 
@@ -384,6 +527,9 @@ const SearchScreen = ({ navigation, route }: any) => {
     if (minRating.trim()) {
       setRatingExpanded(true);
     }
+    if (selectedRegion || localityQuery.trim()) {
+      setLocationExpanded(true);
+    }
   }, [
     selectedCategory,
     verifiedOnly,
@@ -392,23 +538,59 @@ const SearchScreen = ({ navigation, route }: any) => {
     minPrice,
     maxPrice,
     minRating,
+    selectedRegion,
+    localityQuery,
   ]);
 
   const runSearch = (overrideSearchQuery?: string) => {
     const searchValue = overrideSearchQuery ?? searchQuery;
     const cleaned = searchValue.trim();
 
-    if (typeof overrideSearchQuery === 'string') {
-      setSearchQuery(overrideSearchQuery);
-    }
-
     if (cleaned) {
+      // Parse smart search intents!
+      const intents = parseSmartSearchIntent(cleaned);
+
+      // Update states so filters panel reflects the parsed intents visually!
+      if (intents.verifiedOnly !== undefined) setVerifiedOnly(intents.verifiedOnly);
+      if (intents.topArtisansOnly !== undefined) setTopArtisansOnly(intents.topArtisansOnly);
+      if (intents.deliveryOnly !== undefined) setDeliveryOnly(intents.deliveryOnly);
+      
+      setMinPrice(intents.minPrice !== undefined ? intents.minPrice : '');
+      setMaxPrice(intents.maxPrice !== undefined ? intents.maxPrice : '');
+      setMinRating(intents.minRating !== undefined ? intents.minRating : '');
+      
+      // Clear home region scope when user does a keyword search
+      // (region and category can only be set manually via the filter section)
+      if (regionSource === 'home') {
+        setSelectedRegion('');
+        setRegionSource('');
+      }
+
+      // Clean the search bar text to show the parsed search keyword
+      setSearchQuery(intents.searchQuery);
+
       setRecentQueries((prev) => {
         const deduped = [cleaned, ...prev.filter((value) => value.toLowerCase() !== cleaned.toLowerCase())];
         return deduped.slice(0, 6);
       });
+
+      // Call performSearch — no auto-filters from search text,
+      // only price/rating/badge intents are parsed (e.g. "under 500", "5 star")
+      performSearch(true, {
+        searchQuery: intents.searchQuery,
+        category: undefined,
+        region: undefined,
+        minPrice: intents.minPrice,
+        maxPrice: intents.maxPrice,
+        minRating: intents.minRating,
+        verifiedOnly: intents.verifiedOnly,
+        topArtisansOnly: intents.topArtisansOnly,
+        deliveryOnly: intents.deliveryOnly,
+        isHomeRegionScope: false,
+      });
+    } else {
+      performSearch(true);
     }
-    performSearch(true, typeof overrideSearchQuery === 'string' ? { searchQuery: overrideSearchQuery } : undefined);
   };
 
   const handleSearch = () => {
@@ -418,6 +600,7 @@ const SearchScreen = ({ navigation, route }: any) => {
   const handleClearFilters = () => {
     setSelectedCategory('');
     setSelectedRegion('');
+    setRegionSource('');
     setSortBy('');
     setLocalityQuery('');
     setMinPrice('');
@@ -434,7 +617,7 @@ const SearchScreen = ({ navigation, route }: any) => {
   };
 
   const handleProductPress = useCallback((product: Product) => {
-    navigation.navigate('ProductDetail', { productId: product.$id });
+    navigation.navigate('ProductDetail', { productId: product.$id, initialProduct: product });
   }, [navigation]);
 
   const navigateToAuth = (screen: 'Login' | 'Register') => {
@@ -483,6 +666,7 @@ const SearchScreen = ({ navigation, route }: any) => {
   const priceCount = hasPriceSelection ? 1 : 0;
   const ratingCount = minRating.trim() ? 1 : 0;
   const ratingPreview = parseRatingInput(minRating) ?? 0;
+  const locationActiveCount = (selectedRegion && regionSource === 'explicit' ? 1 : 0) + (localityQuery.trim() ? 1 : 0);
 
   const activeFilterCount = [
     selectedCategory,
@@ -529,20 +713,130 @@ const SearchScreen = ({ navigation, route }: any) => {
     return scored.slice(0, 6).map((entry) => entry.item);
   }, [recentQueries, searchQuery]);
 
-  const searchTypeSuggestionPool = useMemo(
-    () => [
-      ...recentQueries,
-      ...SMART_SUGGESTIONS,
-      ...CATEGORIES.map((item) => item.name),
-      ...products.slice(0, 80).map((item) => item.name),
-    ],
-    [products, recentQueries]
+  const [staticSuggestionPool, setStaticSuggestionPool] = useState<string[]>([]);
+  const [locationSuggestPool, setLocationSuggestPool] = useState<string[]>([]);
+  const [dynamicSuggestions, setDynamicSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setDynamicSuggestions([]);
+      return;
+    }
+
+    const handler = setTimeout(async () => {
+      const results = await getProductSuggestions(q).catch(() => []);
+      setDynamicSuggestions(results);
+    }, 150);
+
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  // Build static pool ONCE on mount only (empty deps []).
+  // recentQueries are NOT included here — they are merged instantly in useMemo below.
+  // This prevents the async rebuild gap that blanked suggestions on every re-search.
+  useEffect(() => {
+    const buildPool = async () => {
+      try {
+        const poolSet = new Set<string>();
+        const locSet = new Set<string>();
+
+        // 1. Smart suggestions
+        SMART_SUGGESTIONS.forEach((s) => poolSet.add(s));
+
+        // 2. Categories
+        CATEGORIES.forEach((c) => {
+          poolSet.add(c.name);
+        });
+
+        // 3. Indian states
+        INDIAN_STATES.forEach((s) => {
+          poolSet.add(s.name);
+          locSet.add(s.name);
+        });
+
+        // 4. Fetch all approved sellers to extract real business/craft/local area details
+        const sellers = await getTopVerifiedSellers(300).catch(() => []);
+        sellers.forEach((s) => {
+          if (s.businessName) poolSet.add(s.businessName);
+          if (s.craftType) poolSet.add(s.craftType);
+          if (s.village) {
+            poolSet.add(s.village);
+            locSet.add(s.village);
+          }
+          if (s.city) {
+            poolSet.add(s.city);
+            locSet.add(s.city);
+          }
+          if (s.district) {
+            poolSet.add(s.district);
+            locSet.add(s.district);
+          }
+          if (s.state) {
+            poolSet.add(s.state);
+            locSet.add(s.state);
+          }
+          if (s.address) {
+            poolSet.add(s.address);
+            locSet.add(s.address);
+            // Also extract sub-localities/landmarks from comma-separated address parts
+            const parts = s.address.split(',').map((p) => p.trim()).filter((p) => p.length >= 3);
+            parts.forEach((part) => {
+              poolSet.add(part);
+              locSet.add(part);
+            });
+          }
+        });
+
+        // 5. Read home cache
+        const cache = await readHomeCache().catch(() => null);
+        if (cache) {
+          const cachedProds = [
+            ...(cache.featuredProducts || []),
+            ...(cache.trendingProducts || []),
+            ...(cache.recentProducts || []),
+          ];
+          cachedProds.forEach((p) => {
+            if (p.name) poolSet.add(p.name);
+            if (p.category) poolSet.add(p.category);
+            if (p.region) { poolSet.add(p.region); locSet.add(p.region); }
+            if (p.state) { poolSet.add(p.state); locSet.add(p.state); }
+            if (p.sellerLocationLabel) { poolSet.add(p.sellerLocationLabel); locSet.add(p.sellerLocationLabel); }
+          });
+        }
+
+        setStaticSuggestionPool(Array.from(poolSet).filter(Boolean));
+        setLocationSuggestPool(Array.from(locSet).filter(Boolean));
+      } catch (err) {
+        console.error('Error building suggestion pool:', err);
+      }
+    };
+
+    buildPool();
+  }, []); // ← EMPTY DEPS: runs once on mount, never again
+
+  // Merge recentQueries synchronously via useMemo — instant, no async, no re-fetch.
+  // When user searches, recentQueries updates → this memo recomputes in 0ms →
+  // suggestions immediately reflect the new recent query without any pool rebuild.
+  const suggestionPool = useMemo(
+    () => [...recentQueries, ...staticSuggestionPool],
+    [recentQueries, staticSuggestionPool]
   );
 
   const searchTypeSuggestions = useMemo(
-    () => buildAutosuggestions(searchQuery, searchTypeSuggestionPool, 6),
-    [searchQuery, searchTypeSuggestionPool]
+    () => buildAutosuggestions(searchQuery, suggestionPool, 8),
+    [searchQuery, suggestionPool]
   );
+
+  const finalSuggestions = useMemo(() => {
+    const combined = [...dynamicSuggestions, ...searchTypeSuggestions];
+    const deduped = Array.from(new Set(combined));
+    // Always fall back to recents + smart suggestions so panel is never empty
+    if (deduped.length === 0) {
+      return visibleSuggestions.slice(0, 8);
+    }
+    return deduped.slice(0, 8);
+  }, [dynamicSuggestions, searchTypeSuggestions, visibleSuggestions]);
 
   const sortLabelMap: Record<string, string> = {
     newest: 'Newest',
@@ -623,6 +917,7 @@ const SearchScreen = ({ navigation, route }: any) => {
         break;
       case 'region':
         setSelectedRegion('');
+        setRegionSource('');
         break;
       case 'locality':
         setLocalityQuery('');
@@ -690,7 +985,6 @@ const SearchScreen = ({ navigation, route }: any) => {
     setMinPrice(String(parsedMax));
     setMaxPrice(String(parsedMin));
   };
-
   return (
     <View style={styles.container}>
       <PremiumTopBar
@@ -701,505 +995,782 @@ const SearchScreen = ({ navigation, route }: any) => {
         onRightPress={() => setShowFilters((prev) => !prev)}
       />
 
-      {!user && (
-        <View style={[styles.guestBar, wideRailStyle]}>
-          <Text style={styles.guestBarText}>Login to save products and place orders</Text>
-          <View style={styles.guestBarActions}>
-            <TouchableOpacity style={styles.guestBarSecondary} onPress={() => navigateToAuth('Login')}>
-              <Text style={styles.guestBarSecondaryText}>Login</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.guestBarPrimary} onPress={() => navigateToAuth('Register')}>
-              <Text style={styles.guestBarPrimaryText}>Register</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      <View style={[styles.searchContainer, isCompact && styles.searchContainerCompact, wideRailStyle]}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder={'Search "Darjeeling tea", "Khurja pottery"...'}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onSubmitEditing={handleSearch}
-            returnKeyType="search"
-            onFocus={() => setSearchFocused(true)}
-            onBlur={() => {
-              setTimeout(() => setSearchFocused(false), 220);
-            }}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity
-              onPress={() => {
-                setSearchQuery('');
-              }}
-            >
-              <Ionicons name="close-circle" size={20} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <TouchableOpacity style={styles.searchButton} onPress={handleSearch}>
-          <Ionicons name="search" size={20} color="#FFF" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.filterToggle, activeFilterCount > 0 && styles.filterToggleActive]}
-          onPress={() => setShowFilters(!showFilters)}
-        >
-          <Ionicons name="options-outline" size={20} color={activeFilterCount > 0 ? '#FFF' : COLORS.text} />
-          {activeFilterCount > 0 && (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {activeFilterChips.length > 0 && (
-        <View style={[styles.activeChipRowWrap, wideRailStyle]}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeChipRow}>
-            {activeFilterChips.map((chip) => (
-              <TouchableOpacity
-                key={`active-chip-${chip.key}`}
-                style={styles.activeFilterChip}
-                onPress={() => clearSingleFilter(chip.key)}
-              >
-                <Text style={styles.activeFilterChipText} numberOfLines={1}>{chip.label}</Text>
-                <Ionicons name="close" size={13} color={COLORS.primary} />
+      <View style={[{ flex: 1, width: '100%' }, wideRailStyle]}>
+        {!user && (
+          <View style={styles.guestBar}>
+            <Text style={styles.guestBarText}>Login to save products and place orders</Text>
+            <View style={styles.guestBarActions}>
+              <TouchableOpacity style={styles.guestBarSecondary} onPress={() => navigateToAuth('Login')}>
+                <Text style={styles.guestBarSecondaryText}>Login</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-
-      {!showFilters && searchFocused && searchTypeSuggestions.length > 0 && (
-        <View style={[styles.inputSuggestWrap, wideRailStyle]}>
-          {searchTypeSuggestions.map((item) => (
-            <TouchableOpacity
-              key={`search-suggest-${item}`}
-              style={styles.inputSuggestItem}
-              activeOpacity={0.85}
-              onPressIn={() => {
-                setSearchQuery(item);
-              }}
-              onPress={() => {
-                setSearchFocused(false);
-                setTimeout(() => runSearch(item), 0);
-              }}
-            >
-              <Ionicons name="sparkles-outline" size={15} color={COLORS.primary} />
-              <Text style={styles.inputSuggestText}>{item}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {showFilters && (
-        <View style={[styles.filtersOverlay, wideRailStyle]}>
-        <KeyboardAwareScrollView
-          style={[styles.filtersPanel, isCompact && styles.filtersPanelCompact]}
-          contentContainerStyle={styles.filtersPanelContent}
-          keyboardShouldPersistTaps="handled"
-          enableOnAndroid
-          extraScrollHeight={24}
-          extraHeight={120}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.filtersHeaderTop}>
-            <View style={styles.filtersHeadingWrap}>
-              <Text style={styles.filtersHeading}>Refine Results</Text>
-              <Text style={styles.filtersSubheading}>Dial in quality, craft type, and local trust</Text>
+              <TouchableOpacity style={styles.guestBarPrimary} onPress={() => navigateToAuth('Register')}>
+                <Text style={styles.guestBarPrimaryText}>Register</Text>
+              </TouchableOpacity>
             </View>
-            <View style={styles.filtersHeaderActions}>
-              {activeFilterCount > 0 && (
-                <View style={styles.activeFiltersPill}>
-                  <Text style={styles.activeFiltersPillText}>{activeFilterCount} active</Text>
-                </View>
-              )}
+          </View>
+        )}
+
+        <View style={[styles.searchContainer, isCompact && styles.searchContainerCompact]}>
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={20} color={COLORS.textSecondary} style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder={'Search "Darjeeling tea", "Khurja pottery"...'}
+              value={searchQuery}
+              onChangeText={(text) => {
+                // Typing = user is actively in the input. Always show suggestions.
+                if (blurTimeoutRef.current) {
+                  clearTimeout(blurTimeoutRef.current);
+                  blurTimeoutRef.current = null;
+                }
+                setSearchFocused(true);
+                setSearchQuery(text);
+              }}
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
+              onFocus={() => {
+                if (blurTimeoutRef.current) {
+                  clearTimeout(blurTimeoutRef.current);
+                  blurTimeoutRef.current = null;
+                }
+                setSearchFocused(true);
+              }}
+              onBlur={() => {
+                // Give enough time for suggestion taps to register before hiding
+                blurTimeoutRef.current = setTimeout(() => {
+                  blurTimeoutRef.current = null;
+                  setSearchFocused(false);
+                }, 400);
+              }}
+            />
+            {searchQuery.length > 0 && (
               <TouchableOpacity
-                style={styles.filtersCloseButton}
                 onPress={() => {
-                  Keyboard.dismiss();
-                  setShowFilters(false);
+                  setSearchQuery('');
+                  // Cancel any pending blur and re-show suggestions
+                  if (blurTimeoutRef.current) {
+                    clearTimeout(blurTimeoutRef.current);
+                    blurTimeoutRef.current = null;
+                  }
+                  setSearchFocused(true);
                 }}
               >
-                <Ionicons name="close" size={20} color={COLORS.textSecondary} />
+                <Ionicons name="close-circle" size={20} color={COLORS.textSecondary} />
               </TouchableOpacity>
-            </View>
+            )}
           </View>
 
-          {!!selectedRegion && (
-            <View style={styles.scopeRegionCard}>
-              <View style={styles.scopeRegionTextWrap}>
-                <Text style={styles.scopeRegionLabel}>Home Region Scope</Text>
-                <Text style={styles.scopeRegionValue}>{selectedRegion}</Text>
-              </View>
-              <TouchableOpacity style={styles.scopeRegionClearBtn} onPress={() => setSelectedRegion('')}>
-                <Text style={styles.scopeRegionClearText}>Clear</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+          <TouchableOpacity style={styles.searchButton} onPress={handleSearch}>
+            <Ionicons name="search" size={20} color="#FFF" />
+          </TouchableOpacity>
 
-          <View style={styles.quickSortCard}>
-            <View style={styles.filterLabelRow}>
-              <View style={styles.filterLabelGroup}>
-                <Text style={styles.filterLabel}>Quick Sort</Text>
-                {sortCount > 0 && <Text style={styles.filterCountBadge}>{sortCount}</Text>}
+          <TouchableOpacity
+            style={[styles.filterToggle, activeFilterCount > 0 && styles.filterToggleActive]}
+            onPress={() => setShowFilters(!showFilters)}
+          >
+            <Ionicons name="options-outline" size={20} color={activeFilterCount > 0 ? '#FFF' : COLORS.text} />
+            {activeFilterCount > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
               </View>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickSortRow}>
-              {SORT_OPTIONS.map((opt) => (
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {activeFilterChips.length > 0 && (
+          <View style={styles.activeChipRowWrap}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeChipRow}>
+              {activeFilterChips.map((chip) => (
                 <TouchableOpacity
-                  key={opt.key}
-                  style={[styles.quickSortChip, sortBy === opt.key && styles.quickSortChipActive]}
-                  onPress={() => setSortBy(sortBy === opt.key ? '' : opt.key)}
+                  key={`active-chip-${chip.key}`}
+                  style={styles.activeFilterChip}
+                  onPress={() => clearSingleFilter(chip.key)}
                 >
-                  <Text style={[styles.quickSortChipText, sortBy === opt.key && styles.quickSortChipTextActive]}>
-                    {opt.label}
-                  </Text>
+                  <Text style={styles.activeFilterChipText} numberOfLines={1}>{chip.label}</Text>
+                  <Ionicons name="close" size={13} color={COLORS.primary} />
                 </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
+        )}
 
-          <View style={styles.filterSectionCard}>
-            <View style={styles.filterLabelRow}>
-              <View style={styles.filterLabelGroup}>
-                <Text style={styles.filterLabel}>Category</Text>
-                {categoryCount > 0 && <Text style={styles.filterCountBadge}>{categoryCount}</Text>}
-              </View>
-              <TouchableOpacity style={styles.filterSectionToggle} onPress={() => setCategoryExpanded((value) => !value)}>
-                <Text style={styles.filterSectionToggleText}>{categoryExpanded ? 'Hide' : 'Show'}</Text>
-                <Ionicons
-                  name={categoryExpanded ? 'chevron-up-outline' : 'chevron-down-outline'}
-                  size={16}
-                  color={COLORS.primary}
-                />
-              </TouchableOpacity>
-            </View>
-            {categoryExpanded && (
-              <View style={styles.chipWrap}>
-                {CATEGORIES.map((cat) => (
-                  <TouchableOpacity
-                    key={cat.id}
-                    style={[styles.chip, selectedCategory === cat.id && styles.chipActive]}
-                    onPress={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
-                  >
-                    <Text style={[styles.chipText, selectedCategory === cat.id && styles.chipTextActive]}>
-                      {cat.icon} {cat.name.split(' ')[0]}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-
-          <View style={styles.filterSectionCard}>
-            <View style={styles.filterLabelRow}>
-              <View style={styles.filterLabelGroup}>
-                <Text style={styles.filterLabel}>Best Match Signals</Text>
-                {trustCount > 0 && <Text style={styles.filterCountBadge}>{trustCount}</Text>}
-              </View>
-              <TouchableOpacity style={styles.filterSectionToggle} onPress={() => setTrustExpanded((value) => !value)}>
-                <Text style={styles.filterSectionToggleText}>{trustExpanded ? 'Hide' : 'Show'}</Text>
-                <Ionicons
-                  name={trustExpanded ? 'chevron-up-outline' : 'chevron-down-outline'}
-                  size={16}
-                  color={COLORS.primary}
-                />
-              </TouchableOpacity>
-            </View>
-            {trustExpanded && (
-              <View style={styles.trustRow}>
+        {!showFilters && searchFocused && (
+          <View style={styles.inputSuggestWrap}>
+            {finalSuggestions.length > 0 ? (
+              finalSuggestions.map((item) => (
                 <TouchableOpacity
-                  style={[styles.chip, verifiedOnly && styles.chipActive]}
-                  onPress={() => setVerifiedOnly((value) => !value)}
-                >
-                  <Text style={[styles.chipText, verifiedOnly && styles.chipTextActive]}>Verified artisans only</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.chip, topArtisansOnly && styles.chipActive]}
-                  onPress={() => setTopArtisansOnly((value) => !value)}
-                >
-                  <Text style={[styles.chipText, topArtisansOnly && styles.chipTextActive]}>Top artisans only</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.chip, deliveryOnly && styles.chipActive]}
-                  onPress={() => setDeliveryOnly((value) => !value)}
-                >
-                  <Text style={[styles.chipText, deliveryOnly && styles.chipTextActive]}>Delivery available</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.filterSectionCard}>
-            <View style={styles.filterLabelRow}>
-              <View style={styles.filterLabelGroup}>
-                <Text style={styles.filterLabel}>Price Range</Text>
-                {priceCount > 0 && <Text style={styles.filterCountBadge}>{priceCount}</Text>}
-              </View>
-              <TouchableOpacity style={styles.filterSectionToggle} onPress={() => setPriceExpanded((value) => !value)}>
-                <Text style={styles.filterSectionToggleText}>{priceExpanded ? 'Hide' : 'Show'}</Text>
-                <Ionicons
-                  name={priceExpanded ? 'chevron-up-outline' : 'chevron-down-outline'}
-                  size={16}
-                  color={COLORS.primary}
-                />
-              </TouchableOpacity>
-            </View>
-            {priceExpanded && (
-              <>
-                <View style={styles.priceRangeVisualCard}>
-                  <View style={styles.priceRangeTrack}>
-                    <View style={styles.priceRangeTrackBase} />
-                    <View
-                      style={[
-                        styles.priceRangeFill,
-                        {
-                          left: `${priceVisualLeftPct}%`,
-                          width: `${hasPriceSelection ? Math.max(2, priceVisualWidthPct) : 0}%`,
-                        },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.priceRangeText}>
-                    {safeMinPrice > PRICE_VISUAL_MIN || safeMaxPrice < PRICE_VISUAL_MAX
-                      ? `${formatRupees(safeMinPrice)} to ${formatRupees(safeMaxPrice)}`
-                      : 'No price bound selected'}
-                  </Text>
-                </View>
-
-                <View style={styles.numericRow}>
-                  <TextInput
-                    style={[styles.localityInput, styles.numericInput]}
-                    value={minPrice}
-                    onChangeText={(value) => handlePriceInput('min', value)}
-                    onBlur={normalizePriceInputOrder}
-                    placeholder="Min ₹"
-                    keyboardType="number-pad"
-                    returnKeyType="done"
-                  />
-                  <TextInput
-                    style={[styles.localityInput, styles.numericInput]}
-                    value={maxPrice}
-                    onChangeText={(value) => handlePriceInput('max', value)}
-                    onBlur={normalizePriceInputOrder}
-                    placeholder="Max ₹"
-                    keyboardType="number-pad"
-                    returnKeyType="done"
-                  />
-                </View>
-
-                <View style={styles.priceMetaRow}>
-                  <Text style={styles.priceHelperText}>Allowed range: ₹0 to ₹20,000. Higher values auto-capped. If Min is above Max, values auto-correct.</Text>
-                  {hasPriceSelection ? (
-                    <TouchableOpacity
-                      style={styles.priceResetInlineButton}
-                      onPress={() => {
-                        setMinPrice('');
-                        setMaxPrice('');
-                      }}
-                    >
-                      <Text style={styles.priceResetInlineText}>Reset</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </>
-            )}
-          </View>
-
-          <View style={styles.filterSectionCard}>
-            <View style={styles.filterLabelRow}>
-              <View style={styles.filterLabelGroup}>
-                <Text style={styles.filterLabel}>Rating</Text>
-                {ratingCount > 0 && <Text style={styles.filterCountBadge}>{ratingCount}</Text>}
-              </View>
-              <TouchableOpacity style={styles.filterSectionToggle} onPress={() => setRatingExpanded((value) => !value)}>
-                <Text style={styles.filterSectionToggleText}>{ratingExpanded ? 'Hide' : 'Show'}</Text>
-                <Ionicons
-                  name={ratingExpanded ? 'chevron-up-outline' : 'chevron-down-outline'}
-                  size={16}
-                  color={COLORS.primary}
-                />
-              </TouchableOpacity>
-            </View>
-            {ratingExpanded && (
-              <>
-                <View style={styles.ratingVisualCard}>
-                  <View style={styles.ratingStarRow}>
-                    {[0, 1, 2, 3, 4].map((index) => {
-                      const fillRatio = clampNumber(ratingPreview - index, 0, 1);
-
-                      return (
-                        <View key={`rating-star-${index + 1}`} style={styles.ratingStarCell}>
-                          <Ionicons name="star-outline" size={16} color="#F59E0B" />
-                          <View style={[styles.ratingStarFillClip, { width: `${fillRatio * 100}%` }]}>
-                            <Ionicons name="star" size={16} color="#F59E0B" />
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                  <Text style={styles.ratingVisualText}>
-                    {minRating.trim() ? `Minimum ${minRating.trim()} and above` : 'No minimum rating selected'}
-                  </Text>
-                </View>
-
-                <TextInput
-                  style={styles.localityInput}
-                  value={minRating}
-                  onChangeText={(value) => {
-                    const cleaned = value.replace(/[^0-9.]/g, '');
-                    const singleDot = cleaned.replace(/(\..*)\./g, '$1');
-
-                    if (!singleDot) {
-                      setMinRating('');
-                      return;
+                  key={`search-suggest-${item}`}
+                  style={styles.inputSuggestItem}
+                  activeOpacity={0.85}
+                  onPressIn={() => {
+                    if (blurTimeoutRef.current) {
+                      clearTimeout(blurTimeoutRef.current);
+                      blurTimeoutRef.current = null;
                     }
-
-                    if (singleDot.endsWith('.')) {
-                      const intPart = Number(singleDot.slice(0, -1));
-                      if (Number.isFinite(intPart)) {
-                        setMinRating(`${clampNumber(intPart, 0, 5)}.`);
-                        return;
-                      }
-                    }
-
-                    const parsed = Number(singleDot);
-                    if (!Number.isFinite(parsed)) {
-                      setMinRating(singleDot);
-                      return;
-                    }
-
-                    setMinRating(String(clampNumber(parsed, 0, 5)));
+                    setSearchQuery(item);
                   }}
-                  placeholder="Custom minimum rating (0 to 5)"
-                  keyboardType="decimal-pad"
-                  returnKeyType="done"
-                  blurOnSubmit
-                />
-
-                <View style={styles.ratingMetaRow}>
-                  <Text style={styles.ratingHelperText}>Allowed range: 0 to 5 rating.</Text>
-                  {minRating.trim() ? (
-                    <TouchableOpacity style={styles.ratingResetInlineButton} onPress={() => setMinRating('')}>
-                      <Text style={styles.ratingResetInlineText}>Reset</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </>
+                  onPress={() => {
+                    if (blurTimeoutRef.current) {
+                      clearTimeout(blurTimeoutRef.current);
+                      blurTimeoutRef.current = null;
+                    }
+                    setSearchFocused(false);
+                    runSearch(item);
+                  }}
+                >
+                  <Ionicons name="sparkles-outline" size={15} color={COLORS.primary} />
+                  <Text style={styles.inputSuggestText}>{item}</Text>
+                </TouchableOpacity>
+              ))
+            ) : (
+              visibleSuggestions.map((item) => (
+                <TouchableOpacity
+                  key={`search-fallback-${item}`}
+                  style={styles.inputSuggestItem}
+                  activeOpacity={0.85}
+                  onPressIn={() => {
+                    if (blurTimeoutRef.current) {
+                      clearTimeout(blurTimeoutRef.current);
+                      blurTimeoutRef.current = null;
+                    }
+                    setSearchQuery(item);
+                  }}
+                  onPress={() => {
+                    if (blurTimeoutRef.current) {
+                      clearTimeout(blurTimeoutRef.current);
+                      blurTimeoutRef.current = null;
+                    }
+                    setSearchFocused(false);
+                    runSearch(item);
+                  }}
+                >
+                  <Ionicons name="time-outline" size={15} color={COLORS.textSecondary} />
+                  <Text style={styles.inputSuggestText}>{item}</Text>
+                </TouchableOpacity>
+              ))
             )}
           </View>
-        </KeyboardAwareScrollView>
+        )}
 
-        <View style={styles.filterActionsBar}>
-          <View style={styles.filterActionsButtonsRow}>
-            <TouchableOpacity style={styles.clearButtonGhost} onPress={handleClearFilters}>
-              <Text style={styles.clearFilters}>Clear All</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.applyButton, loading && styles.applyButtonDisabled]}
-              disabled={loading}
-              onPress={() => {
-                Keyboard.dismiss();
-                setShowFilters(false);
-                performSearch(true);
-              }}
+        {showFilters && (
+          <View style={styles.filtersOverlay}>
+            <KeyboardAwareScrollView
+              style={[styles.filtersPanel, isCompact && styles.filtersPanelCompact]}
+              contentContainerStyle={styles.filtersPanelContent}
+              keyboardShouldPersistTaps="handled"
+              enableOnAndroid
+              extraScrollHeight={24}
+              extraHeight={120}
+              showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.applyButtonText}>{resultCtaLabel}</Text>
-            </TouchableOpacity>
+              <View style={styles.filtersHeaderTop}>
+                <View style={styles.filtersHeadingWrap}>
+                  <Text style={styles.filtersHeading}>Refine Results</Text>
+                  <Text style={styles.filtersSubheading}>Dial in quality, craft type, and local trust</Text>
+                </View>
+                <View style={styles.filtersHeaderActions}>
+                  {activeFilterCount > 0 && (
+                    <View style={styles.activeFiltersPill}>
+                      <Text style={styles.activeFiltersPillText}>{activeFilterCount} active</Text>
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.filtersCloseButton}
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setShowFilters(false);
+                    }}
+                  >
+                    <Ionicons name="close" size={20} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              {!!selectedRegion && regionSource === 'home' && (
+                <View style={styles.scopeRegionCard}>
+                  <View style={styles.scopeRegionTextWrap}>
+                    <Text style={styles.scopeRegionLabel}>Home Region Scope</Text>
+                    <Text style={styles.scopeRegionValue}>{selectedRegion}</Text>
+                  </View>
+                  <TouchableOpacity style={styles.scopeRegionClearBtn} onPress={() => {
+                    setSelectedRegion('');
+                    setRegionSource('');
+                  }}>
+                    <Text style={styles.scopeRegionClearText}>Clear</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              <View style={styles.quickSortCard}>
+                <View style={styles.filterLabelRow}>
+                  <View style={styles.filterLabelGroup}>
+                    <Text style={styles.filterLabel}>Quick Sort</Text>
+                    {sortCount > 0 && <Text style={styles.filterCountBadge}>{sortCount}</Text>}
+                  </View>
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickSortRow}>
+                  {SORT_OPTIONS.map((opt) => (
+                    <TouchableOpacity
+                      key={opt.key}
+                      style={[styles.quickSortChip, sortBy === opt.key && styles.quickSortChipActive]}
+                      onPress={() => setSortBy(sortBy === opt.key ? '' : opt.key)}
+                    >
+                      <Text style={[styles.quickSortChipText, sortBy === opt.key && styles.quickSortChipTextActive]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              <View style={styles.unifiedAccordionContainer}>
+                {/* Category Section */}
+                <View>
+                  <TouchableOpacity 
+                    style={styles.modernFilterHeader} 
+                    activeOpacity={0.7}
+                    onPress={() => setCategoryExpanded(!categoryExpanded)}
+                  >
+                    <View style={styles.modernFilterTitleGroup}>
+                      <Ionicons name="grid-outline" size={18} color={COLORS.primary} style={styles.modernFilterIcon} />
+                      <Text style={styles.modernFilterTitle}>Category</Text>
+                      {categoryCount > 0 && (
+                        <View style={styles.modernBadge}>
+                          <Text style={styles.modernBadgeText}>{categoryCount}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Ionicons
+                      name={categoryExpanded ? 'chevron-up-outline' : 'chevron-down-outline'}
+                      size={16}
+                      color={COLORS.textSecondary}
+                    />
+                  </TouchableOpacity>
+                  {categoryExpanded && (
+                    <View style={styles.modernFilterContent}>
+                      <View style={styles.chipWrap}>
+                        {CATEGORIES.map((cat) => (
+                          <TouchableOpacity
+                            key={cat.id}
+                            style={[styles.chip, selectedCategory === cat.id && styles.chipActive]}
+                            onPress={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
+                          >
+                            <Text style={styles.chipEmoji}>{cat.icon}</Text>
+                            <Text style={[styles.chipText, selectedCategory === cat.id && styles.chipTextActive]} numberOfLines={1}>
+                              {getCategoryShortName(cat)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.accordionDivider} />
+
+                {/* Location & Scope Section */}
+                <View style={{ zIndex: 10 }}>
+                  <TouchableOpacity 
+                    style={styles.modernFilterHeader} 
+                    activeOpacity={0.7}
+                    onPress={() => setLocationExpanded(!locationExpanded)}
+                  >
+                    <View style={styles.modernFilterTitleGroup}>
+                      <Ionicons name="location-outline" size={18} color={COLORS.primary} style={styles.modernFilterIcon} />
+                      <Text style={styles.modernFilterTitle}>Location</Text>
+                      {locationActiveCount > 0 && (
+                        <View style={styles.modernBadge}>
+                          <Text style={styles.modernBadgeText}>{locationActiveCount}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Ionicons
+                      name={locationExpanded ? 'chevron-up-outline' : 'chevron-down-outline'}
+                      size={16}
+                      color={COLORS.textSecondary}
+                    />
+                  </TouchableOpacity>
+                  {locationExpanded && (
+                    <View style={styles.modernFilterContent}>
+                      <View style={styles.inputWrapper}>
+                        <Ionicons name="map-outline" size={16} color={COLORS.textSecondary} style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.modernTextInput}
+                          placeholder="Select State..."
+                          value={selectedRegion}
+                          onChangeText={(text) => {
+                            setSelectedRegion(text);
+                            setRegionSource('explicit');
+                          }}
+                          onFocus={() => setRegionFocused(true)}
+                          onBlur={() => {
+                            setTimeout(() => setRegionFocused(false), 350);
+                          }}
+                          placeholderTextColor={COLORS.textTertiary}
+                        />
+                        {!!selectedRegion && (
+                          <TouchableOpacity 
+                            style={styles.inputClearBtn} 
+                            onPress={() => {
+                              setSelectedRegion('');
+                              if (regionSource === 'explicit') {
+                                setRegionSource('');
+                              }
+                            }}
+                          >
+                            <Ionicons name="close-circle" size={16} color={COLORS.textTertiary} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                      {regionFocused && (
+                        <View style={styles.modernInlineSuggestList}>
+                          {INDIAN_STATES.filter(state => 
+                            state.name.toLowerCase().includes(selectedRegion.toLowerCase()) ||
+                            state.id.toLowerCase().includes(selectedRegion.toLowerCase())
+                          ).slice(0, 5).map(state => (
+                            <TouchableOpacity
+                              key={state.id}
+                              style={styles.modernInlineSuggestItem}
+                              onPressIn={() => {
+                                setSelectedRegion(state.name);
+                                setRegionSource('explicit');
+                              }}
+                              onPress={() => {
+                                setRegionFocused(false);
+                                Keyboard.dismiss();
+                              }}
+                            >
+                              <Ionicons name="location-outline" size={14} color={COLORS.primary} />
+                              <Text style={styles.modernInlineSuggestText}>{state.name}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      )}
+
+                      <View style={[styles.inputWrapper, { marginTop: 10 }]}>
+                        <Ionicons name="pin-outline" size={16} color={COLORS.textSecondary} style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.modernTextInput}
+                          placeholder="Village / PIN code..."
+                          value={localityQuery}
+                          onChangeText={setLocalityQuery}
+                          onFocus={() => setLocalityFocused(true)}
+                          onBlur={() => {
+                            setTimeout(() => setLocalityFocused(false), 350);
+                          }}
+                          placeholderTextColor={COLORS.textTertiary}
+                        />
+                        {!!localityQuery && (
+                          <TouchableOpacity 
+                            style={styles.inputClearBtn} 
+                            onPress={() => setLocalityQuery('')}
+                          >
+                            <Ionicons name="close-circle" size={16} color={COLORS.textTertiary} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                      {localityFocused && localityQuery.trim().length >= 2 && (
+                        <View style={styles.modernInlineSuggestList}>
+                          {locationSuggestPool
+                            .filter(item => {
+                              const text = item.toLowerCase();
+                              const q = localityQuery.toLowerCase();
+                              return text.includes(q) && 
+                                !INDIAN_STATES.some(s => s.name.toLowerCase() === text) &&
+                                !CATEGORIES.some(c => c.name.toLowerCase() === text);
+                            })
+                            .slice(0, 5)
+                            .map(item => (
+                              <TouchableOpacity
+                                key={item}
+                                style={styles.modernInlineSuggestItem}
+                                onPressIn={() => {
+                                  setLocalityQuery(item);
+                                }}
+                                onPress={() => {
+                                  setLocalityFocused(false);
+                                  Keyboard.dismiss();
+                                }}
+                              >
+                                <Ionicons name="location-outline" size={14} color={COLORS.primary} />
+                                <Text style={styles.modernInlineSuggestText}>{item}</Text>
+                              </TouchableOpacity>
+                            ))}
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.accordionDivider} />
+
+                {/* Best Match Signals Section */}
+                <View>
+                  <TouchableOpacity 
+                    style={styles.modernFilterHeader} 
+                    activeOpacity={0.7}
+                    onPress={() => setTrustExpanded(!trustExpanded)}
+                  >
+                    <View style={styles.modernFilterTitleGroup}>
+                      <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} style={styles.modernFilterIcon} />
+                      <Text style={styles.modernFilterTitle}>Trust & Delivery</Text>
+                      {trustCount > 0 && (
+                        <View style={styles.modernBadge}>
+                          <Text style={styles.modernBadgeText}>{trustCount}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Ionicons
+                      name={trustExpanded ? 'chevron-up-outline' : 'chevron-down-outline'}
+                      size={16}
+                      color={COLORS.textSecondary}
+                    />
+                  </TouchableOpacity>
+                  {trustExpanded && (
+                    <View style={styles.modernFilterContent}>
+                      <TouchableOpacity 
+                        style={[styles.toggleRow, verifiedOnly && styles.toggleRowActive]} 
+                        activeOpacity={0.85}
+                        onPress={() => setVerifiedOnly(!verifiedOnly)}
+                      >
+                        <View style={styles.toggleRowLeft}>
+                          <View style={styles.toggleRowIconWrap}>
+                            <Ionicons name="shield-checkmark" size={16} color={verifiedOnly ? COLORS.primary : COLORS.textSecondary} />
+                          </View>
+                          <Text style={[styles.toggleRowLabel, verifiedOnly && styles.toggleRowLabelActive]}>Verified Artisan</Text>
+                        </View>
+                        <View style={[styles.customSwitchTrack, verifiedOnly && styles.customSwitchTrackActive]}>
+                          <View style={[styles.customSwitchThumb, verifiedOnly && styles.customSwitchThumbActive]} />
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.toggleRow, { marginTop: 10 }, topArtisansOnly && styles.toggleRowActive]} 
+                        activeOpacity={0.85}
+                        onPress={() => setTopArtisansOnly(!topArtisansOnly)}
+                      >
+                        <View style={styles.toggleRowLeft}>
+                          <View style={styles.toggleRowIconWrap}>
+                            <Ionicons name="ribbon" size={16} color={topArtisansOnly ? COLORS.primary : COLORS.textSecondary} />
+                          </View>
+                          <Text style={[styles.toggleRowLabel, topArtisansOnly && styles.toggleRowLabelActive]}>Top Rated</Text>
+                        </View>
+                        <View style={[styles.customSwitchTrack, topArtisansOnly && styles.customSwitchTrackActive]}>
+                          <View style={[styles.customSwitchThumb, topArtisansOnly && styles.customSwitchThumbActive]} />
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.toggleRow, { marginTop: 10 }, deliveryOnly && styles.toggleRowActive]} 
+                        activeOpacity={0.85}
+                        onPress={() => setDeliveryOnly(!deliveryOnly)}
+                      >
+                        <View style={styles.toggleRowLeft}>
+                          <View style={styles.toggleRowIconWrap}>
+                            <Ionicons name="bicycle" size={16} color={deliveryOnly ? COLORS.primary : COLORS.textSecondary} />
+                          </View>
+                          <Text style={[styles.toggleRowLabel, deliveryOnly && styles.toggleRowLabelActive]}>Delivery Available</Text>
+                        </View>
+                        <View style={[styles.customSwitchTrack, deliveryOnly && styles.customSwitchTrackActive]}>
+                          <View style={[styles.customSwitchThumb, deliveryOnly && styles.customSwitchThumbActive]} />
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.accordionDivider} />
+
+                {/* Price Range Section */}
+                <View>
+                  <TouchableOpacity 
+                    style={styles.modernFilterHeader} 
+                    activeOpacity={0.7}
+                    onPress={() => setPriceExpanded(!priceExpanded)}
+                  >
+                    <View style={styles.modernFilterTitleGroup}>
+                      <Ionicons name="cash-outline" size={18} color={COLORS.primary} style={styles.modernFilterIcon} />
+                      <Text style={styles.modernFilterTitle}>Price</Text>
+                      {priceCount > 0 && (
+                        <View style={styles.modernBadge}>
+                          <Text style={styles.modernBadgeText}>{priceCount}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Ionicons
+                      name={priceExpanded ? 'chevron-up-outline' : 'chevron-down-outline'}
+                      size={16}
+                      color={COLORS.textSecondary}
+                    />
+                  </TouchableOpacity>
+                  {priceExpanded && (
+                    <View style={styles.modernFilterContent}>
+                      {/* Presets row */}
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.presetScrollContainer}>
+                        <TouchableOpacity
+                          style={[styles.presetChip, minPrice === '' && maxPrice === '500' && styles.presetChipActive]}
+                          onPress={() => {
+                            setMinPrice('');
+                            setMaxPrice('500');
+                          }}
+                        >
+                          <Text style={[styles.presetChipText, minPrice === '' && maxPrice === '500' && styles.presetChipTextActive]}>Under ₹500</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.presetChip, minPrice === '500' && maxPrice === '2000' && styles.presetChipActive]}
+                          onPress={() => {
+                            setMinPrice('500');
+                            setMaxPrice('2000');
+                          }}
+                        >
+                          <Text style={[styles.presetChipText, minPrice === '500' && maxPrice === '2000' && styles.presetChipTextActive]}>₹500 - ₹2k</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.presetChip, minPrice === '2000' && maxPrice === '5000' && styles.presetChipActive]}
+                          onPress={() => {
+                            setMinPrice('2000');
+                            setMaxPrice('5000');
+                          }}
+                        >
+                          <Text style={[styles.presetChipText, minPrice === '2000' && maxPrice === '5000' && styles.presetChipTextActive]}>₹2k - ₹5k</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.presetChip, minPrice === '5000' && maxPrice === '' && styles.presetChipActive]}
+                          onPress={() => {
+                            setMinPrice('5000');
+                            setMaxPrice('');
+                          }}
+                        >
+                          <Text style={[styles.presetChipText, minPrice === '5000' && maxPrice === '' && styles.presetChipTextActive]}>Over ₹5k</Text>
+                        </TouchableOpacity>
+                      </ScrollView>
+
+                      {/* Custom input fields side by side */}
+                      <View style={styles.priceInputsRow}>
+                        <View style={styles.priceInputBox}>
+                          <Text style={styles.priceInputPrefix}>₹</Text>
+                          <TextInput
+                            style={styles.priceInputText}
+                            value={minPrice}
+                            onChangeText={(value) => handlePriceInput('min', value)}
+                            onBlur={normalizePriceInputOrder}
+                            placeholder="Min"
+                            placeholderTextColor={COLORS.textTertiary}
+                            keyboardType="number-pad"
+                            returnKeyType="done"
+                          />
+                        </View>
+                        <View style={styles.priceInputConnector} />
+                        <View style={styles.priceInputBox}>
+                          <Text style={styles.priceInputPrefix}>₹</Text>
+                          <TextInput
+                            style={styles.priceInputText}
+                            value={maxPrice}
+                            onChangeText={(value) => handlePriceInput('max', value)}
+                            onBlur={normalizePriceInputOrder}
+                            placeholder="Max"
+                            placeholderTextColor={COLORS.textTertiary}
+                            keyboardType="number-pad"
+                            returnKeyType="done"
+                          />
+                        </View>
+                        {hasPriceSelection && (
+                          <TouchableOpacity
+                            style={styles.priceResetBtn}
+                            onPress={() => {
+                              setMinPrice('');
+                              setMaxPrice('');
+                            }}
+                          >
+                            <Ionicons name="refresh-outline" size={16} color={COLORS.primary} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.accordionDivider} />
+
+                {/* Rating Section */}
+                <View>
+                  <TouchableOpacity 
+                    style={styles.modernFilterHeader} 
+                    activeOpacity={0.7}
+                    onPress={() => setRatingExpanded(!ratingExpanded)}
+                  >
+                    <View style={styles.modernFilterTitleGroup}>
+                      <Ionicons name="star-outline" size={18} color={COLORS.primary} style={styles.modernFilterIcon} />
+                      <Text style={styles.modernFilterTitle}>Rating</Text>
+                      {ratingCount > 0 && (
+                        <View style={styles.modernBadge}>
+                          <Text style={styles.modernBadgeText}>{ratingCount}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Ionicons
+                      name={ratingExpanded ? 'chevron-up-outline' : 'chevron-down-outline'}
+                      size={16}
+                      color={COLORS.textSecondary}
+                    />
+                  </TouchableOpacity>
+                  {ratingExpanded && (
+                    <View style={styles.modernFilterContent}>
+                      {/* Gold interactive stars */}
+                      <View style={styles.visualStarsContainer}>
+                        {[0, 1, 2, 3, 4].map((index) => {
+                          const starVal = index + 1;
+                          const fillRatio = clampNumber(ratingPreview - index, 0, 1);
+
+                          return (
+                            <TouchableOpacity
+                              key={`rating-star-${starVal}`}
+                              style={styles.ratingStarCell}
+                              activeOpacity={0.7}
+                              onPress={() => {
+                                setMinRating(String(starVal));
+                              }}
+                            >
+                              <Ionicons name="star-outline" size={30} color="#F59E0B" />
+                              <View style={[styles.ratingStarFillClip, { width: `${fillRatio * 100}%` }]}>
+                                <Ionicons name="star" size={30} color="#F59E0B" />
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+
+                      {/* Text Presets Row */}
+                      <View style={styles.ratingPresetsRow}>
+                        <TouchableOpacity
+                          style={[styles.presetChip, minRating === '4' && styles.presetChipActive]}
+                          onPress={() => setMinRating('4')}
+                        >
+                          <Text style={[styles.presetChipText, minRating === '4' && styles.presetChipTextActive]}>4.0★ & above</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.presetChip, minRating === '3' && styles.presetChipActive]}
+                          onPress={() => setMinRating('3')}
+                        >
+                          <Text style={[styles.presetChipText, minRating === '3' && styles.presetChipTextActive]}>3.0★ & above</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.presetChip, minRating === '' && styles.presetChipActive]}
+                          onPress={() => setMinRating('')}
+                        >
+                          <Text style={[styles.presetChipText, minRating === '' && styles.presetChipTextActive]}>Any Rating</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </KeyboardAwareScrollView>
+
+            <View style={styles.filterActionsBar}>
+              <View style={styles.filterActionsButtonsRow}>
+                <TouchableOpacity style={styles.clearButtonGhost} onPress={handleClearFilters}>
+                  <Text style={styles.clearFilters}>Clear All</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.applyButton, loading && styles.applyButtonDisabled]}
+                  disabled={loading}
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setShowFilters(false);
+                    performSearch(true);
+                  }}
+                >
+                  <Text style={styles.applyButtonText}>{resultCtaLabel}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
-        </View>
-        </View>
-      )}
+        )}
 
-      {!showFilters && !searched && (
-        <View style={[styles.suggestionWrap, wideRailStyle]}>
-          <Text style={styles.suggestionTitle}>Smart Suggestions</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionRow} keyboardShouldPersistTaps="handled">
-            {visibleSuggestions.map((suggestion) => (
-              <TouchableOpacity
-                key={suggestion}
-                style={styles.suggestionChip}
-                onPress={() => {
-                  setSearchQuery(suggestion);
-                  setTimeout(() => performSearch(true), 0);
-                }}
-              >
-                <Ionicons name="sparkles-outline" size={14} color={COLORS.primary} />
-                <Text style={styles.suggestionText}>{suggestion}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+        {!showFilters && !searched && (
+          <View style={styles.suggestionWrap}>
+            <Text style={styles.suggestionTitle}>Smart Suggestions</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestionRow} keyboardShouldPersistTaps="handled">
+              {visibleSuggestions.map((suggestion) => (
+                <TouchableOpacity
+                  key={suggestion}
+                  style={styles.suggestionChip}
+                  onPress={() => {
+                    setSearchQuery(suggestion);
+                    setTimeout(() => performSearch(true), 0);
+                  }}
+                >
+                  <Ionicons name="sparkles-outline" size={14} color={COLORS.primary} />
+                  <Text style={styles.suggestionText}>{suggestion}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
-      {searched && !loading && !showFilters && total > 0 && (
-        <View style={[styles.resultBar, wideRailStyle]}>
-          <Text style={styles.resultText} numberOfLines={1} ellipsizeMode="tail">
-            {total} result{total === 1 ? '' : 's'} found
-          </Text>
-        </View>
-      )}
+        {searched && !loading && !showFilters && total > 0 && (
+          <View style={styles.resultBar}>
+            <Text style={styles.resultText} numberOfLines={1} ellipsizeMode="tail">
+              {total} result{total === 1 ? '' : 's'} found
+            </Text>
+          </View>
+        )}
 
-      {!showFilters && (loading && !products.length ? (
-        <LoadingSpinner />
-      ) : (
-        <FlatList
-          data={products}
-          keyExtractor={(item) => item.$id}
-          numColumns={2}
-          columnWrapperStyle={styles.row}
-          removeClippedSubviews={Platform.OS === 'android'}
-          initialNumToRender={3}
-          maxToRenderPerBatch={3}
-          windowSize={4}
-          updateCellsBatchingPeriod={110}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          onScrollBeginDrag={Keyboard.dismiss}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={[
-            styles.listContent,
-            isCompact && styles.listContentCompact,
-            wideRailStyle,
-            { paddingBottom: 12 },
-          ]}
-          renderItem={renderProduct}
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.2}
-          ListFooterComponent={
-            loadingMore ? (
-              <View style={styles.loadMoreFooter}>
-                <ActivityIndicator size="small" color={COLORS.primary} />
-              </View>
-            ) : null
-          }
-          ListEmptyComponent={
-            searched ? (
-              <View style={styles.emptyContainer}>
-                <Ionicons name="search" size={64} color={COLORS.textTertiary} />
-                <Text style={styles.emptyText}>No results found</Text>
-                <Text style={styles.emptySubtext}>
-                  Try product name, artisan shop name, or village/locality keywords
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.emptyContainer}>
-                <Ionicons name="search" size={64} color={COLORS.textTertiary} />
-                <Text style={styles.emptyText}>Search for authentic products</Text>
-                <Text style={styles.emptySubtext}>
-                  Discover by product, artisan shop, locality, or village
-                </Text>
-              </View>
-            )
-          }
-        />
-      ))}
+        {!showFilters && (loading && !products.length ? (
+          <LoadingSpinner />
+        ) : (
+          <FlatList
+            style={styles.list}
+            data={products}
+            keyExtractor={(item) => item.$id}
+            numColumns={2}
+            columnWrapperStyle={styles.row}
+            removeClippedSubviews={Platform.OS === 'android'}
+            initialNumToRender={3}
+            maxToRenderPerBatch={3}
+            windowSize={3}
+            updateCellsBatchingPeriod={110}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            onScrollBeginDrag={Keyboard.dismiss}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[
+              styles.listContent,
+              isCompact && styles.listContentCompact,
+              { paddingBottom: 12 },
+            ]}
+            renderItem={renderProduct}
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.2}
+            ListFooterComponent={
+              loadingMore ? (
+                <View style={styles.loadMoreFooter}>
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              searched ? (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="search" size={64} color={COLORS.textTertiary} />
+                  <Text style={styles.emptyText}>No results found</Text>
+                  <Text style={styles.emptySubtext}>
+                    Try product name, artisan shop name, or village/locality keywords
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="search" size={64} color={COLORS.textTertiary} />
+                  <Text style={styles.emptyText}>Search for authentic products</Text>
+                  <Text style={styles.emptySubtext}>
+                    Discover by product, artisan shop, locality, or village
+                  </Text>
+                </View>
+              )
+            }
+          />
+        ))}
+      </View>
     </View>
   );
 };
@@ -1534,16 +2105,37 @@ const styles = StyleSheet.create({
   chipWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    paddingBottom: 2,
+    justifyContent: 'space-between',
+    rowGap: 10,
   },
   chip: {
-    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 22,
-    borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.background,
+    width: '31%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.background,
   },
-  chipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  chipText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
-  chipTextActive: { color: '#FFF', fontWeight: '600' },
+  chipActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: `${COLORS.primary}12`,
+  },
+  chipText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  chipTextActive: {
+    color: COLORS.primaryDark,
+    fontWeight: '700',
+  },
+  chipEmoji: {
+    fontSize: 20,
+  },
   localityInput: {
     marginTop: 4,
     borderWidth: 1,
@@ -1663,8 +2255,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   ratingStarCell: {
-    width: 16,
-    height: 16,
+    width: 30,
+    height: 30,
     position: 'relative',
   },
   ratingStarFillClip: {
@@ -1846,6 +2438,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.primaryDark,
   },
+  list: {
+    flex: 1,
+    width: '100%',
+  },
   listContent: { padding: 16 },
   listContentCompact: { paddingTop: 12, paddingHorizontal: 14 },
   loadMoreFooter: { paddingVertical: 12 },
@@ -1853,6 +2449,264 @@ const styles = StyleSheet.create({
   emptyContainer: { alignItems: 'center', marginTop: 80 },
   emptyText: { fontSize: 18, fontWeight: '600', color: COLORS.text, marginTop: 16, marginBottom: 8 },
   emptySubtext: { fontSize: 14, color: COLORS.textSecondary, textAlign: 'center' },
+  
+  // Premium Accordion Filter Styles
+  unifiedAccordionContainer: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  accordionDivider: {
+    height: 1,
+    backgroundColor: COLORS.borderLight,
+  },
+  modernFilterHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  modernFilterTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  modernFilterIcon: {
+    marginRight: 2,
+  },
+  modernFilterTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  modernBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  modernBadgeText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  modernFilterContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.background,
+    paddingHorizontal: 12,
+    height: 46,
+  },
+  inputIcon: {
+    marginRight: 8,
+  },
+  modernTextInput: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '500',
+    padding: 0,
+  },
+  inputClearBtn: {
+    padding: 4,
+  },
+  modernInlineSuggestList: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    overflow: 'hidden',
+  },
+  modernInlineSuggestItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
+  },
+  modernInlineSuggestText: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
+  
+  // High-Fidelity Zomato/Blinkit Preset & Switch Styles
+  presetScrollContainer: {
+    paddingVertical: 4,
+  },
+  presetChip: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.background,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginRight: 8,
+  },
+  presetChipActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: `${COLORS.primary}12`,
+  },
+  presetChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  presetChipTextActive: {
+    color: COLORS.primaryDark,
+    fontWeight: '800',
+  },
+  priceInputsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    gap: 8,
+  },
+  priceInputBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.background,
+    paddingHorizontal: 12,
+    height: 44,
+  },
+  priceInputPrefix: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    fontWeight: '700',
+    marginRight: 6,
+  },
+  priceInputText: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.text,
+    fontWeight: '600',
+    padding: 0,
+  },
+  priceInputConnector: {
+    width: 8,
+    height: 1,
+    backgroundColor: COLORS.textTertiary,
+  },
+  priceResetBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: `${COLORS.primary}12`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.background,
+  },
+  toggleRowActive: {
+    borderColor: `${COLORS.primary}33`,
+    backgroundColor: `${COLORS.primary}06`,
+  },
+  toggleRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  toggleRowIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+  },
+  toggleRowLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  toggleRowLabelActive: {
+    color: COLORS.text,
+    fontWeight: '700',
+  },
+  customSwitchTrack: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#E7E5E4',
+    padding: 2,
+    justifyContent: 'center',
+  },
+  customSwitchTrackActive: {
+    backgroundColor: COLORS.primary,
+  },
+  customSwitchThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FFF',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  customSwitchThumbActive: {
+    alignSelf: 'flex-end',
+  },
+  visualStarsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+    paddingVertical: 8,
+  },
+  ratingPresetsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingBottom: 4,
+  },
 });
 
 export default SearchScreen;

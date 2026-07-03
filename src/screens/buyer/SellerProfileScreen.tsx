@@ -173,9 +173,12 @@ const SellerProfileScreen = ({ route, navigation }: any) => {
           return;
         }
 
-        const currentPosition = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        let currentPosition = await Location.getLastKnownPositionAsync({});
+        if (!currentPosition) {
+          currentPosition = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+        }
 
         const km = getDistanceKm(
           currentPosition.coords.latitude,
@@ -546,7 +549,7 @@ const SellerProfileScreen = ({ route, navigation }: any) => {
                 key={product.$id}
                 product={product}
                 variant="premium"
-                onPress={() => navigation.navigate('ProductDetail', { productId: product.$id })}
+                onPress={() => navigation.navigate('ProductDetail', { productId: product.$id, initialProduct: product })}
               />
             ))}
           </View>

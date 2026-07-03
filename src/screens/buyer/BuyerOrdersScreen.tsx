@@ -108,20 +108,7 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
     }
   }, []);
 
-  if (loading && !refreshing) return <LoadingSpinner fullScreen />;
-
-  if (error && !refreshing) {
-    return (
-      <View style={styles.errorContainer}>
-        <Ionicons name="cloud-offline-outline" size={64} color={COLORS.textTertiary} />
-        <Text style={styles.errorText}>Failed to load orders</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={loadOrders}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
+  // ✅ These hooks MUST be defined before any early returns
   const renderOrder = useCallback(
     ({ item }: { item: Order }) => {
       const firstItem = item.items?.[0];
@@ -189,6 +176,21 @@ const BuyerOrdersScreen = ({ navigation }: any) => {
       ) : null,
     [orders.length, tabCounts.delivered, tabCounts.pending, tabCounts.processing, tabCounts.shipped]
   );
+
+  // Early returns AFTER all hooks
+  if (loading && !refreshing) return <LoadingSpinner fullScreen />;
+
+  if (error && !refreshing) {
+    return (
+      <View style={styles.errorContainer}>
+        <Ionicons name="cloud-offline-outline" size={64} color={COLORS.textTertiary} />
+        <Text style={styles.errorText}>Failed to load orders</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={loadOrders}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

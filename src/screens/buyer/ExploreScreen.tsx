@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Keyboard,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ProductCard } from '../../components/ProductCard';
@@ -223,11 +224,16 @@ const ExploreScreen = ({ navigation }: any) => {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           onScrollBeginDrag={Keyboard.dismiss}
+          removeClippedSubviews={Platform.OS === 'android'}
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          windowSize={3}
+          updateCellsBatchingPeriod={100}
           renderItem={({ item }) => (
             <ProductCard
               product={item}
               performanceMode="list"
-              onPress={() => navigation.navigate('ProductDetail', { productId: item.$id })}
+              onPress={() => navigation.navigate('ProductDetail', { productId: item.$id, initialProduct: item })}
             />
           )}
           ListEmptyComponent={

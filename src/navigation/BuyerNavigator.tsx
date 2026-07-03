@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
@@ -29,6 +30,8 @@ import BuyerNotificationsScreen from '../screens/buyer/BuyerNotificationsScreen'
 import BuyerMyReviewsScreen from '../screens/buyer/BuyerMyReviewsScreen';
 import BuyerSettingsScreen from '../screens/buyer/BuyerSettingsScreen';
 import ProfileScreen from '../screens/shared/ProfileScreen';
+import ChatScreen from '../screens/shared/ChatScreen';
+import InboxScreen from '../screens/shared/InboxScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -63,6 +66,7 @@ const HomeStack = () => (
     <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
     <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={{ title: 'Write Review' }} />
     <Stack.Screen name="ProductReviews" component={ProductReviewsScreen} options={{ title: 'Reviews' }} />
+    <Stack.Screen name="Chat" component={ChatScreen} options={{ headerShown: false }} />
   </Stack.Navigator>
 );
 
@@ -75,6 +79,7 @@ const SearchStack = () => (
     <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
     <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={{ title: 'Write Review' }} />
     <Stack.Screen name="ProductReviews" component={ProductReviewsScreen} options={{ title: 'Reviews' }} />
+    <Stack.Screen name="Chat" component={ChatScreen} options={{ headerShown: false }} />
   </Stack.Navigator>
 );
 
@@ -95,6 +100,7 @@ const ExploreStack = () => (
     <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
     <Stack.Screen name="Cart" component={CartScreen} options={{ title: 'My Cart' }} />
     <Stack.Screen name="Checkout" component={CheckoutScreen} options={{ title: 'Checkout' }} />
+    <Stack.Screen name="Chat" component={ChatScreen} options={{ headerShown: false }} />
   </Stack.Navigator>
 );
 
@@ -103,6 +109,7 @@ const WishlistStack = () => (
     <Stack.Screen name="WishlistMain" component={WishlistScreen} options={{ headerShown: false }} />
     <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
     <Stack.Screen name="SellerProfile" component={SellerProfileScreen} options={{ headerShown: false }} />
+    <Stack.Screen name="Chat" component={ChatScreen} options={{ headerShown: false }} />
   </Stack.Navigator>
 );
 
@@ -118,47 +125,18 @@ const ProfileStack = () => (
     <Stack.Screen name="BuyerSettings" component={BuyerSettingsScreen} options={{ headerShown: false }} />
     <Stack.Screen name="ProductDetail" component={ProductDetailScreen} options={{ headerShown: false }} />
     <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={{ title: 'Write Review' }} />
+    <Stack.Screen name="Inbox" component={InboxScreen} options={{ headerShown: false }} />
+    <Stack.Screen name="Chat" component={ChatScreen} options={{ headerShown: false }} />
   </Stack.Navigator>
 );
 
 // ─── Main Tab Navigator ─────────────────────────────────────────
 
-const BuyerNavigator = () => {
+const WishlistTabIcon = ({ focused, color, size }: { focused: boolean; color: string; size: number }) => {
   const { user } = useAuth();
-  const [profileUnreadBadge, setProfileUnreadBadge] = React.useState<number | undefined>(undefined);
-  const [wishlistBadge, setWishlistBadge] = React.useState<number | undefined>(undefined);
+  const [wishlistBadge, setWishlistBadge] = useState<number | undefined>(undefined);
 
-  React.useEffect(() => {
-    let mounted = true;
-
-    const loadUnread = async () => {
-      if (!user?.$id) {
-        if (mounted) setProfileUnreadBadge(undefined);
-        return;
-      }
-
-      try {
-        const unread = await getUnreadCount(user.$id);
-        if (mounted) {
-          setProfileUnreadBadge(unread > 0 ? unread : undefined);
-        }
-      } catch {
-        if (mounted) {
-          setProfileUnreadBadge(undefined);
-        }
-      }
-    };
-
-    loadUnread();
-    const timer = setInterval(loadUnread, 25000);
-
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
-  }, [user?.$id]);
-
-  React.useEffect(() => {
+  useEffect(() => {
     let mounted = true;
 
     const loadWishlistBadge = async () => {
@@ -197,6 +175,67 @@ const BuyerNavigator = () => {
   }, [user?.$id]);
 
   return (
+    <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
+      <Ionicons name={focused ? 'heart' : 'heart-outline'} size={size} color={color} />
+      {wishlistBadge !== undefined && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{wishlistBadge}</Text>
+        </View>
+      )}
+    </View>
+  );
+};
+
+const ProfileTabIcon = ({ focused, color, size }: { focused: boolean; color: string; size: number }) => {
+  const { user } = useAuth();
+  const [profileUnreadBadge, setProfileUnreadBadge] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadUnread = async () => {
+      if (!user?.$id) {
+        if (mounted) setProfileUnreadBadge(undefined);
+        return;
+      }
+
+      try {
+        const unread = await getUnreadCount(user.$id);
+        if (mounted) {
+          setProfileUnreadBadge(unread > 0 ? unread : undefined);
+        }
+      } catch {
+        if (mounted) {
+          setProfileUnreadBadge(undefined);
+        }
+      }
+    };
+
+    loadUnread();
+    const timer = setInterval(loadUnread, 25000);
+
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [user?.$id]);
+
+  return (
+    <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
+      <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />
+      {profileUnreadBadge !== undefined && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{profileUnreadBadge}</Text>
+        </View>
+      )}
+    </View>
+  );
+};
+
+const BuyerNavigator = () => {
+  const { route } = {} as any; // mock route if needed, React Navigation injects it
+
+  return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.background }} edges={[]}>
     <Tab.Navigator
       backBehavior="history"
@@ -211,10 +250,11 @@ const BuyerNavigator = () => {
             iconName = focused ? 'search' : 'search-outline';
           } else if (route.name === 'Explore') {
             iconName = focused ? 'location' : 'location-outline';
-          } else if (route.name === 'Wishlist') {
-            iconName = focused ? 'heart' : 'heart-outline';
-          } else if (route.name === 'Profile') {
-            iconName = focused ? 'person' : 'person-outline';
+          }
+
+          if (route.name === 'Wishlist' || route.name === 'Profile') {
+            // Handled by custom icon renderers below
+            return null;
           }
 
           return <Ionicons name={iconName} size={size} color={color} />;
@@ -242,16 +282,48 @@ const BuyerNavigator = () => {
       <Tab.Screen
         name="Wishlist"
         component={WishlistStack}
-        options={{ title: 'Saved', tabBarBadge: wishlistBadge }}
+        options={{
+          title: 'Saved',
+          tabBarIcon: ({ focused, color, size }) => (
+            <WishlistTabIcon focused={focused} color={color} size={size} />
+          ),
+        }}
       />
       <Tab.Screen
         name="Profile"
         component={ProfileStack}
-        options={{ tabBarBadge: profileUnreadBadge }}
+        options={{
+          tabBarIcon: ({ focused, color, size }) => (
+            <ProfileTabIcon focused={focused} color={color} size={size} />
+          ),
+        }}
       />
     </Tab.Navigator>
     </SafeAreaView>
   );
 };
+
+const styles = StyleSheet.create({
+  badge: {
+    position: 'absolute',
+    top: -5,
+    right: -7,
+    backgroundColor: COLORS.error,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1,
+    borderColor: COLORS.surface,
+  },
+  badgeText: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+});
 
 export default BuyerNavigator;

@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -166,6 +167,7 @@ const AdminProductsScreen = ({ navigation }: any) => {
             uri={imageUri}
             style={styles.productImage}
             variant="product"
+            performanceMode="list"
           />
           <View style={styles.cardInfo}>
             <View style={styles.nameStatusRow}>
@@ -310,6 +312,10 @@ const AdminProductsScreen = ({ navigation }: any) => {
         keyExtractor={(item) => item.$id}
         contentContainerStyle={[styles.listContent, { paddingBottom: 16 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />}
+        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={10}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="cube-outline" size={60} color={COLORS.textTertiary} />

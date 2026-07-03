@@ -14,8 +14,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { getSellerByUserId } from '../../services/sellerService';
 import { getProductsBySeller } from '../../services/productService';
-import { getSellerReviews, calculateSellerRating } from '../../services/reviewService';
-import { getSellerOrders } from '../../services/orderService';
+import { calculateSellerRating } from '../../services/reviewService';
+import { getSellerOrderStats } from '../../services/orderService';
 import { Seller } from '../../types/seller.types';
 import { Product } from '../../types/product.types';
 import { COLORS } from '../../constants/colors';
@@ -91,23 +91,18 @@ const SellerDashboardScreen = ({ navigation }: any) => {
       setSeller(sellerData);
 
       if (sellerData) {
-        const [sellerProducts, sellerRating, sellerReviews, sellerOrders] = await Promise.all([
+        const [sellerProducts, sellerRating, orderStats] = await Promise.all([
           getProductsBySeller(sellerData.$id),
           calculateSellerRating(sellerData.$id),
-          getSellerReviews(sellerData.$id, 1, 200),
-          getSellerOrders(sellerData.$id, 200),
+          getSellerOrderStats(sellerData.$id),
         ]);
 
         setProducts(sellerProducts);
         setAvgRating(sellerRating.avgRating);
-        setTotalReviews(sellerRating.totalReviews || sellerReviews.total || 0);
-        setTotalOrders(sellerOrders.length);
-        setDeliveredOrders(
-          sellerOrders.filter((order) => (order.status || '').toLowerCase() === 'delivered').length
-        );
-        setCancelledOrders(
-          sellerOrders.filter((order) => (order.status || '').toLowerCase() === 'cancelled').length
-        );
+        setTotalReviews(sellerRating.totalReviews || 0);
+        setTotalOrders(orderStats.total);
+        setDeliveredOrders(orderStats.delivered);
+        setCancelledOrders(orderStats.cancelled);
 
         if (user?.$id) {
           SELLER_DASHBOARD_CACHE = {
@@ -115,10 +110,10 @@ const SellerDashboardScreen = ({ navigation }: any) => {
             seller: sellerData,
             products: sellerProducts,
             avgRating: sellerRating.avgRating,
-            totalReviews: sellerRating.totalReviews || sellerReviews.total || 0,
-            totalOrders: sellerOrders.length,
-            deliveredOrders: sellerOrders.filter((order) => (order.status || '').toLowerCase() === 'delivered').length,
-            cancelledOrders: sellerOrders.filter((order) => (order.status || '').toLowerCase() === 'cancelled').length,
+            totalReviews: sellerRating.totalReviews || 0,
+            totalOrders: orderStats.total,
+            deliveredOrders: orderStats.delivered,
+            cancelledOrders: orderStats.cancelled,
             cachedAt: Date.now(),
           };
         }

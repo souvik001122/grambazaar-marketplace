@@ -293,8 +293,8 @@ const ProductCardComponent: React.FC<ProductCardProps> = ({
 
   if (isListMode) {
     return (
-      <TouchableOpacity activeOpacity={0.92} onPress={onPress}>
-        <View style={cardSurfaceStyle}>{cardContent}</View>
+      <TouchableOpacity activeOpacity={0.92} onPress={onPress} style={cardSurfaceStyle}>
+        {cardContent}
       </TouchableOpacity>
     );
   }

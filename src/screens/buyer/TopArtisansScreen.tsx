@@ -6,13 +6,14 @@ import {
   FlatList,
   RefreshControl,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SellerCard } from '../../components/SellerCard';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { Seller } from '../../types/seller.types';
 import { COLORS } from '../../constants/colors';
-import { getSellersByRegion, getTopVerifiedSellers } from '../../services/sellerService';
+import { getSellersByRegion, getTopVerifiedSellers, sellerCache, clearAllSellerCaches } from '../../services/sellerService';
 import { rankSellersForTopArtisans } from '../../utils/homeRanking';
 import { PremiumTopBar } from '../../components/PremiumTopBar';
 
@@ -25,8 +26,41 @@ const TopArtisansScreen = ({ navigation, route }: any) => {
       ? regionLabelParam.trim()
       : regionFilter || 'All India';
 
-  const [sellers, setSellers] = useState<Seller[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [sellers, setSellers] = useState<Seller[]>(() => {
+    const cachedSellersList = Array.from(sellerCache.values());
+    if (cachedSellersList.length > 0) {
+      let filtered = cachedSellersList;
+      if (regionFilter) {
+        filtered = cachedSellersList.filter((s) => {
+          const sState = (s.state || '').toLowerCase();
+          const sRegion = ((s as any).region || '').toLowerCase();
+          const rFilter = regionFilter.toLowerCase();
+          return sState === rFilter || sRegion === rFilter;
+        });
+      }
+      if (filtered.length > 0) {
+        return rankSellersForTopArtisans(filtered);
+      }
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState(() => {
+    const cachedSellersList = Array.from(sellerCache.values());
+    if (cachedSellersList.length > 0) {
+      if (regionFilter) {
+        const filtered = cachedSellersList.filter((s) => {
+          const sState = (s.state || '').toLowerCase();
+          const sRegion = ((s as any).region || '').toLowerCase();
+          const rFilter = regionFilter.toLowerCase();
+          return sState === rFilter || sRegion === rFilter;
+        });
+        if (filtered.length > 0) return false;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  });
   const [refreshing, setRefreshing] = useState(false);
 
   const subtitle = useMemo(
@@ -55,6 +89,7 @@ const TopArtisansScreen = ({ navigation, route }: any) => {
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
+    clearAllSellerCaches();
     loadSellers();
   }, [loadSellers]);
 
@@ -81,6 +116,10 @@ const TopArtisansScreen = ({ navigation, route }: any) => {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[COLORS.primary]} />}
         contentContainerStyle={styles.listContent}
+        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={3}
         ListHeaderComponent={
           <View style={styles.headerCard}>
             <View style={styles.headerTitleRow}>
