@@ -1,10 +1,6 @@
-import { MD3LightTheme, MD3DarkTheme } from 'react-native-paper';
-
-// Custom color palette for GramBazaar
+// Custom color palette for GramBazaar (Plain JS theme objects)
 export const lightTheme = {
-  ...MD3LightTheme,
   colors: {
-    ...MD3LightTheme.colors,
     primary: '#8B4513', // Earthy brown for rural/artisan theme
     secondary: '#D2691E', // Chocolate brown
     tertiary: '#CD853F', // Peru/golden brown
@@ -25,9 +21,7 @@ export const lightTheme = {
 };
 
 export const darkTheme = {
-  ...MD3DarkTheme,
   colors: {
-    ...MD3DarkTheme.colors,
     primary: '#D2691E',
     secondary: '#F4A460',
     tertiary: '#DEB887',

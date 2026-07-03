@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/colors';
+import { PREMIUM_STACK_OPTIONS } from './premiumStackOptions';
 
 // Seller Screens
 import SellerDashboardScreen from '../screens/seller/SellerDashboardScreen';
@@ -17,6 +18,8 @@ import SellerNotificationsScreen from '../screens/seller/SellerNotificationsScre
 import SellerSettingsScreen from '../screens/seller/SellerSettingsScreen';
 import { SellerVerificationStatusScreen } from '../screens/seller/SellerVerificationStatusScreen';
 import ProfileScreen from '../screens/shared/ProfileScreen';
+import ChatScreen from '../screens/shared/ChatScreen';
+import InboxScreen from '../screens/shared/InboxScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -69,7 +72,7 @@ const SellerTabs = () => {
 
 const SellerNavigator = () => {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ ...PREMIUM_STACK_OPTIONS, headerShown: false }}>
       <Stack.Screen name="SellerTabs" component={SellerTabs} />
       <Stack.Screen
         name="EditProduct"
@@ -78,36 +81,46 @@ const SellerNavigator = () => {
       <Stack.Screen
         name="SellerOrders"
         component={SellerOrdersScreen}
-        options={{ headerShown: true, title: 'Orders', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SellerMyProducts"
         component={MyProductsScreen}
-        options={{ headerShown: true, title: 'My Products', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SellerReviews"
         component={SellerReviewsScreen}
-        options={{ headerShown: true, title: 'Reviews', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SellerAnalytics"
         component={SellerAnalyticsScreen}
-        options={{ headerShown: true, title: 'Analytics', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SellerNotifications"
         component={SellerNotificationsScreen}
-        options={{ headerShown: true, title: 'Notifications', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="SellerSettings"
         component={SellerSettingsScreen}
-        options={{ headerShown: true, title: 'Settings', headerStyle: { backgroundColor: COLORS.primary }, headerTintColor: '#fff' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="VerificationStatus"
         component={SellerVerificationStatusScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Inbox"
+        component={InboxScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={ChatScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

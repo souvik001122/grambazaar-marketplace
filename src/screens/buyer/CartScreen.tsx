@@ -5,12 +5,12 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
 import { useCartStore } from '../../stores/cartStore';
 import { formatPrice } from '../../utils/formatting';
+import { PremiumImage } from '../../components/PremiumImage';
 import { normalizeImageList, resolveImageUrl } from '../../services/storageService';
 import { appwriteConfig } from '../../config/appwrite';
 import { showAlert } from '../../utils/alert';
@@ -89,13 +89,15 @@ const CartScreen = ({ navigation }: any) => {
 
   const renderItem = ({ item }: any) => {
     const imageList = normalizeImageList(item?.product?.images);
-    const imageUrl =
-      resolveImageUrl(appwriteConfig.productImagesBucketId, imageList[0]) ||
-      'https://via.placeholder.com/100';
+    const imageUrl = resolveImageUrl(appwriteConfig.productImagesBucketId, imageList[0]);
 
     return (
       <View style={styles.cartItem}>
-        <Image source={{ uri: imageUrl }} style={styles.itemImage} />
+        <PremiumImage
+          uri={imageUrl}
+          style={styles.itemImage}
+          variant="product"
+        />
         <View style={styles.itemInfo}>
           <Text style={styles.itemName} numberOfLines={2}>
             {item.product.name}

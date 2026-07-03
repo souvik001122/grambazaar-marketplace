@@ -4,6 +4,7 @@ import { Order, OrderItem } from '../types/index';
 import { sendNotification } from './notificationService';
 import { getSellerById } from './sellerService';
 import { isCompletedSale } from '../utils/salesMetrics';
+import { normalizeImageList } from './storageService';
 
 const PAYMENT_PENDING = 'pending';
 const PAYMENT_PAID = 'paid';
@@ -68,6 +69,48 @@ const canTransitionOrderStatus = (currentStatus: string, newStatus: string): boo
   };
 
   return (transitions[currentStatus] || []).includes(newStatus);
+};
+
+const toFiniteNumber = (value: unknown, fallback: number): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeOrderItems = (rawItems: unknown): OrderItem[] => {
+  let parsedItems = rawItems;
+
+  if (typeof parsedItems === 'string') {
+    try {
+      parsedItems = JSON.parse(parsedItems);
+    } catch {
+      parsedItems = [];
+    }
+  }
+
+  if (!Array.isArray(parsedItems)) {
+    return [];
+  }
+
+  return parsedItems
+    .map((raw) => {
+      const item = raw as any;
+      const imageCandidates = normalizeImageList(
+        item?.productImage ?? item?.image ?? item?.images ?? item?.product?.images
+      );
+      const normalizedImage = imageCandidates[0] || '';
+      const normalizedQuantity = Math.max(1, Math.trunc(toFiniteNumber(item?.quantity, 1)));
+      const normalizedPrice = Math.max(0, toFiniteNumber(item?.price, 0));
+
+      return {
+        productId: String(item?.productId || item?.product?.$id || ''),
+        productName: String(item?.productName || item?.name || item?.product?.name || 'Product'),
+        productImage: normalizedImage,
+        quantity: normalizedQuantity,
+        price: normalizedPrice,
+        sellerId: String(item?.sellerId || item?.product?.sellerId || ''),
+      } as OrderItem;
+    })
+    .filter((item) => Boolean(item.productId || item.productName));
 };
 
 const syncSellerOrderCount = async (sellerId: string): Promise<void> => {
@@ -497,6 +540,53 @@ export const getSellerOrderCount = async (sellerId: string): Promise<number> => 
 };
 
 /**
+ * Get order status counts for seller dashboard
+ */
+export const getSellerOrderStats = async (
+  sellerId: string
+): Promise<{ total: number; delivered: number; cancelled: number }> => {
+  try {
+    const [totalRes, deliveredRes, cancelledRes] = await Promise.all([
+      databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.ordersCollectionId,
+        [
+          Query.equal('sellerId', sellerId),
+          Query.limit(1),
+        ]
+      ),
+      databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.ordersCollectionId,
+        [
+          Query.equal('sellerId', sellerId),
+          Query.equal('status', 'delivered'),
+          Query.limit(1),
+        ]
+      ),
+      databases.listDocuments(
+        appwriteConfig.databaseId,
+        appwriteConfig.ordersCollectionId,
+        [
+          Query.equal('sellerId', sellerId),
+          Query.equal('status', 'cancelled'),
+          Query.limit(1),
+        ]
+      ),
+    ]);
+    return {
+      total: totalRes.total,
+      delivered: deliveredRes.total,
+      cancelled: cancelledRes.total,
+    };
+  } catch (error) {
+    console.error('Error fetching seller order stats:', error);
+    return { total: 0, delivered: 0, cancelled: 0 };
+  }
+};
+
+
+/**
  * Get seller revenue
  */
 export const getSellerRevenue = async (sellerId: string): Promise<number> => {
@@ -522,14 +612,7 @@ export const getSellerRevenue = async (sellerId: string): Promise<number> => {
  * Parse order document — handles `items` being JSON string or array
  */
 const parseOrderDocument = (doc: any): any => {
-  let items = doc.items;
-  if (typeof items === 'string') {
-    try {
-      items = JSON.parse(items);
-    } catch {
-      items = [];
-    }
-  }
+  const items = normalizeOrderItems(doc.items);
   const status = normalizeOrderStatus(doc.status);
   const paymentStatus = normalizePaymentStatus(doc.paymentStatus, status);
   const courierName = doc.courierName || undefined;
@@ -544,6 +627,6 @@ const parseOrderDocument = (doc: any): any => {
     trackingId,
     shippingDate,
     trackingInfo: trackingId,
-    items: items || [],
+    items,
   };
 };

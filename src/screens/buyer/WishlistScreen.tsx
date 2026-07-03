@@ -12,12 +12,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '../../constants/colors';
 import { useAuth } from '../../context/AuthContext';
-import { getWishlistProducts, removeFromWishlist, subscribeWishlistChanges } from '../../services/wishlistService';
-import { getProductById } from '../../services/productService';
+import { getWishlistProducts, removeFromWishlist, subscribeWishlistChanges, getCachedWishlistProductsSync } from '../../services/wishlistService';
+import { getProductById, getCachedProductSync } from '../../services/productService';
 import { Product } from '../../types/product.types';
 import { SavedProduct } from '../../types/common.types';
 import { ProductCard } from '../../components/ProductCard';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 import { showAlert } from '../../utils/alert';
 import { BUYER_LAYOUT } from '../../constants/layout';
 
@@ -50,8 +51,26 @@ const WishlistScreen = ({ navigation }: any) => {
   };
 
   const { user } = useAuth();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [products, setProducts] = useState<Product[]>(() => {
+    if (user?.$id) {
+      const cachedSaved = getCachedWishlistProductsSync(user.$id);
+      if (cachedSaved.length > 0) {
+        return cachedSaved
+          .map((item) => getCachedProductSync(item.productId))
+          .filter(Boolean) as Product[];
+      }
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState(() => {
+    if (user?.$id) {
+      const cachedSaved = getCachedWishlistProductsSync(user.$id);
+      if (cachedSaved.length > 0) {
+        return false;
+      }
+    }
+    return true;
+  });
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
   const [hydratedOnce, setHydratedOnce] = useState(false);
@@ -150,7 +169,7 @@ const WishlistScreen = ({ navigation }: any) => {
           performanceMode="list"
           fullWidth
           variant="premium"
-          onPress={() => navigation.navigate('ProductDetail', { productId: item.$id })}
+          onPress={() => navigation.navigate('ProductDetail', { productId: item.$id, initialProduct: item })}
         />
         <TouchableOpacity
           style={styles.removeBtn}
@@ -166,13 +185,13 @@ const WishlistScreen = ({ navigation }: any) => {
   if (!user) {
     return (
       <View style={styles.container}>
-        <View style={styles.screenHeader}>
-          <View style={styles.screenHeaderRow}>
-            <Ionicons name="heart" size={22} color="#FFF" />
-            <Text style={styles.screenHeaderTitle}>My Wishlist</Text>
-          </View>
-          <Text style={styles.screenHeaderSubtitle}>Login to save and manage your picks</Text>
-        </View>
+        <PremiumTopBar
+          title="My Wishlist"
+          subtitle="Login to save and manage your picks"
+          icon="heart"
+          showBack={navigation.canGoBack()}
+          onBack={() => navigation.goBack()}
+        />
 
         <View style={[styles.guestWrap, railStyle]}>
           <Ionicons name="lock-closed-outline" size={64} color={COLORS.textTertiary} />
@@ -217,14 +236,13 @@ const WishlistScreen = ({ navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.screenHeader}>
-        <View style={styles.screenHeaderRow}>
-          <Ionicons name="heart" size={22} color="#FFF" />
-          <Text style={styles.screenHeaderTitle}>My Wishlist</Text>
-        </View>
-        <Text style={styles.screenHeaderSubtitle}>Products you saved for later</Text>
-      </View>
+      <PremiumTopBar
+        title="My Wishlist"
+        subtitle="Products you saved for later"
+        icon="heart"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+      />
       <FlatList
         data={products}
         keyExtractor={(item) => item.$id}

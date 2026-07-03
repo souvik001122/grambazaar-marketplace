@@ -14,6 +14,7 @@ import { updateOrderStatus, updateOrderPaymentStatus } from '../../services/orde
 import { createAdminLog } from '../../services/adminService';
 import { COLORS } from '../../constants/colors';
 import { showAlert } from '../../utils/alert';
+import { PremiumTopBar } from '../../components/PremiumTopBar';
 
 const STATUS_FLOW = ['pending', 'processing', 'shipped', 'delivered'];
 
@@ -188,7 +189,16 @@ const AdminOrderDetailScreen = ({ route, navigation }: any) => {
   const trackingLink = getTrackingLink(order.courierName, trackingId);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: tabBarHeight }}>
+    <View style={styles.container}>
+      <PremiumTopBar
+        title="Order Detail"
+        subtitle={`#${(order.$id || '').substring(0, 10).toUpperCase()} • ${statusLabel(order.status)}`}
+        icon="receipt-outline"
+        showBack={navigation.canGoBack()}
+        onBack={() => navigation.goBack()}
+      />
+
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: tabBarHeight }}>
       {/* Order Header */}
       <View style={styles.headerCard}>
         <Text style={styles.orderId}>Order #{(order.$id || '').substring(0, 10).toUpperCase()}</Text>
@@ -364,6 +374,7 @@ const AdminOrderDetailScreen = ({ route, navigation }: any) => {
 
       <View style={{ height: 30 }} />
     </ScrollView>
+    </View>
   );
 };
 

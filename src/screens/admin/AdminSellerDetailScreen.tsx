@@ -4,12 +4,14 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Image,
   TouchableOpacity,
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
+import { appwriteConfig } from '../../config/appwrite';
+import { normalizeImageList, resolveImageUrl } from '../../services/storageService';
+import { PremiumImage } from '../../components/PremiumImage';
 
 const AdminSellerDetailScreen = ({ route, navigation }: any) => {
   const tabBarHeight = 16;
@@ -53,8 +55,9 @@ const AdminSellerDetailScreen = ({ route, navigation }: any) => {
     </View>
   );
 
-  const shopPhotoUrl = seller.verificationDocuments?.[0] || '';
-  const idProofUrl = seller.verificationDocuments?.[1] || '';
+  const verificationDocs = normalizeImageList(seller.verificationDocuments);
+  const shopPhotoUrl = resolveImageUrl(appwriteConfig.documentsBucketId, verificationDocs[0]);
+  const idProofUrl = resolveImageUrl(appwriteConfig.documentsBucketId, verificationDocs[1]);
   const locality = seller.village || '';
   const district = seller.district || seller.city || '';
   const state = seller.state || seller.region || '';
@@ -70,13 +73,12 @@ const AdminSellerDetailScreen = ({ route, navigation }: any) => {
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: tabBarHeight }}>
       {/* Header with shop photo */}
       <View style={styles.header}>
-        {shopPhotoUrl ? (
-          <Image source={{ uri: shopPhotoUrl }} style={styles.shopPhoto} resizeMode="cover" />
-        ) : (
-          <View style={[styles.shopPhoto, styles.placeholderPhoto]}>
-            <Ionicons name="storefront" size={60} color={COLORS.textTertiary} />
-          </View>
-        )}
+        <PremiumImage
+          uri={shopPhotoUrl}
+          style={styles.shopPhoto}
+          resizeMode="cover"
+          variant="shop"
+        />
         <View style={styles.headerOverlay}>
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={24} color="#FFF" />
@@ -160,15 +162,14 @@ const AdminSellerDetailScreen = ({ route, navigation }: any) => {
           <View style={styles.docsGrid}>
             <View style={styles.docItem}>
               <Text style={styles.docLabel}>Shop Photo (Image)</Text>
-              {shopPhotoUrl ? (
-                <TouchableOpacity onPress={() => openDocumentPreview(shopPhotoUrl, 'image', 'Shop Photo')}>
-                  <Image source={{ uri: shopPhotoUrl }} style={styles.docImage} resizeMode="cover" />
-                </TouchableOpacity>
-              ) : (
-                <View style={[styles.docImage, styles.docPlaceholder]}>
-                  <Ionicons name="image-outline" size={26} color={COLORS.textTertiary} />
-                </View>
-              )}
+              <TouchableOpacity onPress={() => openDocumentPreview(shopPhotoUrl, 'image', 'Shop Photo')} disabled={!shopPhotoUrl}>
+                <PremiumImage
+                  uri={shopPhotoUrl}
+                  style={styles.docImage}
+                  resizeMode="cover"
+                  variant="document"
+                />
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.docActionBtn}
                 onPress={() => openDocumentPreview(shopPhotoUrl, 'image', 'Shop Photo')}

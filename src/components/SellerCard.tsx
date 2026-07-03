@@ -1,12 +1,15 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Seller } from '../types/seller.types';
 import { TrustBadge } from './TrustBadge';
 import { StatusBadge } from './StatusBadge';
+import { PremiumImage } from './PremiumImage';
 import { COLORS } from '../constants/colors';
 import { getStateName } from '../constants/regions';
 import { calculateTrustScore, isTopArtisan } from '../utils/trustScore';
+import { appwriteConfig } from '../config/appwrite';
+import { normalizeImageList, resolveImageUrl } from '../services/storageService';
 
 interface SellerCardProps {
   seller: Seller;
@@ -21,7 +24,8 @@ const SellerCardComponent: React.FC<SellerCardProps> = ({
   showStatus = false,
   variant = 'default',
 }) => {
-  const imageUrl = seller.verificationDocuments?.[0] || null;
+  const verificationDocs = normalizeImageList(seller.verificationDocuments);
+  const imageUrl = resolveImageUrl(appwriteConfig.documentsBucketId, verificationDocs[0]);
   const trustScore = calculateTrustScore(seller);
   const topArtisan = isTopArtisan(seller);
   const premiumVariant = variant === 'premium';
@@ -39,13 +43,15 @@ const SellerCardComponent: React.FC<SellerCardProps> = ({
       activeOpacity={0.82}
     >
       <View style={[styles.imageWrap, premiumVariant && styles.premiumImageWrap]}>
-        {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={[styles.image, premiumVariant && styles.premiumImage]} resizeMode="contain" />
-        ) : (
-          <View style={[styles.image, premiumVariant && styles.premiumImage, styles.imagePlaceholder]}>
-            <Ionicons name="storefront-outline" size={32} color={COLORS.textTertiary} />
-          </View>
-        )}
+        <PremiumImage
+          uri={imageUrl}
+          style={[styles.image, premiumVariant && styles.premiumImage]}
+          resizeMode="contain"
+          variant="shop"
+          performanceMode="list"
+          previewWidth={240}
+          previewHeight={320}
+        />
       </View>
       
       <View style={[styles.content, premiumVariant && styles.premiumContent]}>
@@ -122,46 +128,48 @@ export const SellerCard = React.memo(
 const styles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    marginBottom: 16,
+    borderRadius: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
     flexDirection: 'row',
     overflow: 'hidden',
   },
   premiumContainer: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: `${COLORS.primary}22`,
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    borderColor: `${COLORS.primary}24`,
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   image: {
-    width: 100,
+    width: 96,
     height: 120,
     backgroundColor: COLORS.card,
-    borderRadius: 10,
+    borderRadius: 11,
   },
   premiumImage: {
-    width: 108,
-    height: 132,
+    width: 104,
+    height: 128,
   },
   imageWrap: {
-    width: 112,
-    height: 132,
-    padding: 6,
+    width: 110,
+    height: 136,
+    padding: 7,
     backgroundColor: COLORS.card,
     justifyContent: 'center',
     alignItems: 'center',
   },
   premiumImageWrap: {
-    width: 120,
-    height: 144,
+    width: 116,
+    height: 140,
   },
   imagePlaceholder: {
     justifyContent: 'center',
@@ -170,7 +178,8 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
   },
   premiumContent: {
     paddingHorizontal: 13,
@@ -180,7 +189,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 7,
   },
   info: {
     flexDirection: 'row',
@@ -188,27 +197,27 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 15,
+    fontWeight: '800',
     color: COLORS.text,
     flex: 1,
   },
   premiumName: {
-    fontSize: 18,
+    fontSize: 17,
     letterSpacing: 0.1,
   },
   verifiedIcon: {
-    marginLeft: 4,
+    marginLeft: 6,
   },
   skills: {
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.textSecondary,
-    marginBottom: 8,
+    marginBottom: 9,
     lineHeight: 18,
   },
   premiumSkills: {
-    fontSize: 14,
-    lineHeight: 19,
+    fontSize: 13,
+    lineHeight: 18,
     marginBottom: 10,
   },
   footer: {
@@ -228,6 +237,7 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontSize: 12,
     color: COLORS.textSecondary,
+    fontWeight: '600',
   },
   premiumLocationText: {
     fontSize: 13,
@@ -237,18 +247,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-    marginTop: 8,
+    marginTop: 9,
   },
   metaChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    borderRadius: 12,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.card,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
   },
   metaChipText: {
     fontSize: 10,
@@ -259,12 +269,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    borderRadius: 12,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: '#F59E0B',
     backgroundColor: '#FEF3C7',
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
   },
   topArtisanChipText: {
     fontSize: 10,
